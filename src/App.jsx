@@ -1,5 +1,6 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+
 import {
   Alert,
   Button,
@@ -58,52 +59,101 @@ function getStatusLabel(status) {
   return labels[String(status).toUpperCase()] || status;
 }
 
+/**
+ * Формирование дерева:
+ *
+ * Тема
+ *   └── Изделие
+ *         └── Группа
+ *
+ * Важно:
+ * ID группы может повторяться у разных изделий.
+ * Поэтому ключ группы должен включать ID темы и изделия.
+ */
 function getTreeData(temas, searchValue = '') {
-  const normalizedSearch = searchValue.trim().toLowerCase();
+  const normalizedSearch = searchValue
+    .trim()
+    .toLocaleLowerCase('ru-RU');
 
   return (temas || [])
     .map((tema) => {
       const izdelia = (tema.izdelia || [])
         .map((izdelie) => {
-          const groupes = (izdelie.groupes || [])
-            .filter((groupe) => {
-              if (!normalizedSearch) return true;
+          const designation = String(izdelie.name || '').trim();
+          const description = String(izdelie.fullName || '').trim();
 
-              return String(groupe.name || '')
-                .toLowerCase()
-                .includes(normalizedSearch);
-            })
+          const productLabel = [
+            designation,
+            description,
+          ]
+            .filter(Boolean)
+            .join(' — ') || `Изделие ${izdelie.id}`;
+
+          const productMatches =
+            !normalizedSearch ||
+            productLabel
+              .toLocaleLowerCase('ru-RU')
+              .includes(normalizedSearch) ||
+            String(izdelie.id).includes(normalizedSearch);
+
+          const groupes = (izdelie.groupes || [])
             .map((groupe) => ({
               title: groupe.name || `Группа ${groupe.id}`,
-              key: `group-${groupe.id}`,
+
+              key: `group-${tema.id}-${izdelie.id}-${groupe.id}`,
+
               icon: <FolderOutlined />,
+
               isLeaf: true,
+
               nodeType: 'group',
+
               data: {
                 temaId: tema.id,
                 izdelieId: izdelie.id,
                 groupeId: groupe.id,
+
+                temaName: tema.name,
+                izdelieName: productLabel,
+                groupeName: groupe.name,
               },
-            }));
+            }))
+            .filter((groupe) => {
+              if (!normalizedSearch || productMatches) {
+                return true;
+              }
 
-          const izdelieMatches =
-            !normalizedSearch ||
-            String(izdelie.name || '')
-              .toLowerCase()
-              .includes(normalizedSearch) ||
-            String(izdelie.fullName || '')
-              .toLowerCase()
-              .includes(normalizedSearch);
+              return String(groupe.title)
+                .toLocaleLowerCase('ru-RU')
+                .includes(normalizedSearch);
+            });
 
-          if (!izdelieMatches && groupes.length === 0) {
+          if (!productMatches && groupes.length === 0) {
             return null;
           }
 
           return {
-            title: izdelie.fullName || izdelie.name || `Изделие ${izdelie.id}`,
-            key: `product-${izdelie.id}`,
+            title: (
+              <span className="tree-product-title">
+                <Text strong>
+                  {designation || `Изделие ${izdelie.id}`}
+                </Text>
+
+                {description && (
+                  <Text type="secondary">
+                    {' — '}
+                    {description}
+                  </Text>
+                )}
+              </span>
+            ),
+
+            key: `product-${tema.id}-${izdelie.id}`,
+
             icon: <AppstoreOutlined />,
+
             children: groupes,
+
             nodeType: 'product',
           };
         })
@@ -112,7 +162,9 @@ function getTreeData(temas, searchValue = '') {
       const temaMatches =
         !normalizedSearch ||
         String(tema.name || '')
-          .toLowerCase()
+          .toLocaleLowerCase('ru-RU')
+          .includes(normalizedSearch) ||
+        String(tema.indeksKd ?? '')
           .includes(normalizedSearch);
 
       if (!temaMatches && izdelia.length === 0) {
@@ -121,9 +173,13 @@ function getTreeData(temas, searchValue = '') {
 
       return {
         title: tema.name || `Тема ${tema.id}`,
+
         key: `tema-${tema.id}`,
+
         icon: <BranchesOutlined />,
+
         children: izdelia,
+
         nodeType: 'tema',
       };
     })
@@ -148,6 +204,9 @@ function renderValue(value) {
     : value;
 }
 
+/**
+ * Отображение элемента сборочной структуры PDM.
+ */
 function AssemblyNode({ node }) {
   const hasChildren = node.children?.length > 0;
 
@@ -202,18 +261,24 @@ function AssemblyNode({ node }) {
       {node.fitsSeries !== null && node.fitsSeries !== undefined && (
         <div className="assembly-node-extra">
           <Tag color={node.fitsSeries ? 'success' : 'warning'}>
-            {node.fitsSeries ? 'Соответствует серии' : 'Не соответствует серии'}
+            {node.fitsSeries
+              ? 'Соответствует серии'
+              : 'Не соответствует серии'}
           </Tag>
 
           {node.fitReason && (
-            <Text type="secondary">{node.fitReason}</Text>
+            <Text type="secondary">
+              {node.fitReason}
+            </Text>
           )}
         </div>
       )}
 
       {node.series?.length > 0 && (
         <div className="assembly-series">
-          <Text type="secondary">Серии:</Text>
+          <Text type="secondary">
+            Серии:
+          </Text>
 
           {node.series.map((series, index) => (
             <Tag key={`${node.id}-series-${index}`}>
@@ -240,6 +305,7 @@ function AssemblyNode({ node }) {
 export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
 
+  // Дерево PDM
   const [treeData, setTreeData] = useState([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeSearch, setTreeSearch] = useState('');
@@ -247,12 +313,14 @@ export default function App() {
   const [selectedGroup, setSelectedGroup] = useState(null);
   const [expandedKeys, setExpandedKeys] = useState([]);
 
+  // Таблица КВ
   const [tableData, setTableData] = useState([]);
   const [groupInfo, setGroupInfo] = useState(null);
   const [tableLoading, setTableLoading] = useState(false);
 
   const [selectedRow, setSelectedRow] = useState(null);
 
+  // Состав PDM
   const [assemblyData, setAssemblyData] = useState([]);
   const [assemblyLoading, setAssemblyLoading] = useState(false);
 
@@ -263,6 +331,32 @@ export default function App() {
     [treeData, treeSearch],
   );
 
+  const treeStatistics = useMemo(() => {
+    const temas = treeData.length;
+
+    let izdelia = 0;
+    let groupes = 0;
+
+    treeData.forEach((tema) => {
+      const products = tema.izdelia || [];
+
+      izdelia += products.length;
+
+      products.forEach((product) => {
+        groupes += (product.groupes || []).length;
+      });
+    });
+
+    return {
+      temas,
+      izdelia,
+      groupes,
+    };
+  }, [treeData]);
+
+  /**
+   * Загрузка дерева PDM.
+   */
   const loadTree = useCallback(async () => {
     setTreeLoading(true);
     setGlobalError(null);
@@ -270,29 +364,36 @@ export default function App() {
     try {
       const response = await treeApi.getFullTree();
 
-      setTreeData(response?.temas || []);
+      const temas = Array.isArray(response?.temas)
+        ? response.temas
+        : [];
 
-      const firstTema = response?.temas?.[0];
+      setTreeData(temas);
 
-      if (firstTema) {
-        setExpandedKeys([`tema-${firstTema.id}`]);
+      if (temas.length > 0) {
+        setExpandedKeys([`tema-${temas[0].id}`]);
       }
     } catch (error) {
       const errorMessage =
         error?.message || 'Не удалось загрузить дерево изделий';
 
       setGlobalError(errorMessage);
+
       messageApi.error(errorMessage);
     } finally {
       setTreeLoading(false);
     }
   }, [messageApi]);
 
+  /**
+   * Загрузка таблицы комплектовок выбранной группы.
+   */
   const loadTable = useCallback(
     async (group) => {
       if (!group) return;
 
       setTableLoading(true);
+
       setTableData([]);
       setGroupInfo(null);
       setSelectedRow(null);
@@ -301,7 +402,12 @@ export default function App() {
       try {
         const response = await kvApi.getTable(group);
 
-        setTableData(response?.rows || []);
+        setTableData(
+          Array.isArray(response?.rows)
+            ? response.rows
+            : [],
+        );
+
         setGroupInfo(response?.groupInfo || null);
       } catch (error) {
         messageApi.error(
@@ -314,13 +420,18 @@ export default function App() {
     [messageApi],
   );
 
+  /**
+   * Загрузка состава спецификации PDM.
+   */
   const loadAssemblyPreview = useCallback(
     async (row) => {
       if (!row?.specifId) {
         setAssemblyData([]);
+
         messageApi.warning(
           'Для выбранной записи отсутствует идентификатор спецификации',
         );
+
         return;
       }
 
@@ -330,7 +441,11 @@ export default function App() {
       try {
         const response = await kvApi.getAssemblyPreview(row.specifId);
 
-        setAssemblyData(Array.isArray(response) ? response : []);
+        setAssemblyData(
+          Array.isArray(response)
+            ? response
+            : [],
+        );
       } catch (error) {
         messageApi.error(
           error?.message || 'Не удалось загрузить состав из PDM',
@@ -346,6 +461,9 @@ export default function App() {
     loadTree();
   }, [loadTree]);
 
+  /**
+   * Обработка выбора узла дерева.
+   */
   const handleTreeSelect = (keys, info) => {
     if (!keys.length) return;
 
@@ -358,14 +476,21 @@ export default function App() {
     const group = node.data;
 
     setSelectedGroup(group);
+
     loadTable(group);
   };
 
+  /**
+   * Выбор строки таблицы.
+   */
   const handleRowSelect = (record) => {
     setSelectedRow(record);
     setAssemblyData([]);
   };
 
+  /**
+   * Открытие предпросмотра PDM.
+   */
   const handleOpenPreview = () => {
     if (!selectedRow) {
       messageApi.warning('Сначала выбери запись в таблице');
@@ -373,6 +498,21 @@ export default function App() {
     }
 
     loadAssemblyPreview(selectedRow);
+  };
+
+  /**
+   * Уникальный ключ строки таблицы.
+   *
+   * Один ID служебной записки может встречаться
+   * с несколькими ID спецификаций.
+   */
+  const getTableRowKey = (record) => {
+    return [
+      record.slZapiskaId ?? 'no-sl',
+      record.specifId ?? 'no-specif',
+      record.komplektovkaId ?? 'no-kv',
+      record.number ?? 'no-number',
+    ].join('-');
   };
 
   const columns = [
@@ -401,7 +541,9 @@ export default function App() {
         value ? (
           <Text strong>{value}</Text>
         ) : (
-          <Text type="secondary">Не сформирована</Text>
+          <Text type="secondary">
+            Не сформирована
+          </Text>
         ),
     },
     {
@@ -466,7 +608,21 @@ export default function App() {
       ]
         .filter(Boolean)
         .join(' / ')
-    : 'Группа не выбрана';
+    : selectedGroup
+      ? [
+          selectedGroup.temaName,
+          selectedGroup.izdelieName,
+          selectedGroup.groupeName || `Группа ${selectedGroup.groupeId}`,
+        ]
+          .filter(Boolean)
+          .join(' / ')
+      : 'Группа не выбрана';
+
+  const selectedTreeKeys = selectedGroup
+    ? [
+        `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`,
+      ]
+    : [];
 
   return (
     <div className="app">
@@ -519,7 +675,10 @@ export default function App() {
         <section className="panel tree-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>Структура изделий</Title>
+              <Title level={5}>
+                Структура изделий
+              </Title>
+
               <Text type="secondary">
                 Темы, изделия и группы
               </Text>
@@ -546,11 +705,7 @@ export default function App() {
                   expandedKeys={expandedKeys}
                   onExpand={setExpandedKeys}
                   onSelect={handleTreeSelect}
-                  selectedKeys={
-                    selectedGroup
-                      ? [`group-${selectedGroup.groupeId}`]
-                      : []
-                  }
+                  selectedKeys={selectedTreeKeys}
                 />
               ) : (
                 !treeLoading && (
@@ -565,7 +720,15 @@ export default function App() {
 
           <div className="panel-footer">
             <Text type="secondary">
-              Тем: {treeData.length}
+              Тем: {treeStatistics.temas}
+            </Text>
+
+            <Text type="secondary">
+              Изделий: {treeStatistics.izdelia}
+            </Text>
+
+            <Text type="secondary">
+              Групп: {treeStatistics.groupes}
             </Text>
           </div>
         </section>
@@ -574,7 +737,9 @@ export default function App() {
         <section className="panel table-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>Комплектовки и служебные записки</Title>
+              <Title level={5}>
+                Комплектовки и служебные записки
+              </Title>
 
               <Text type="secondary">
                 {selectedGroupTitle}
@@ -602,11 +767,7 @@ export default function App() {
               />
             ) : (
               <Table
-                rowKey={(record) =>
-                  record.slZapiskaId ??
-                  record.komplektovkaId ??
-                  record.number
-                }
+                rowKey={getTableRowKey}
                 columns={columns}
                 dataSource={tableData}
                 loading={tableLoading}
@@ -621,13 +782,11 @@ export default function App() {
                 scroll={{ x: 1100 }}
                 rowSelection={{
                   type: 'radio',
+
                   selectedRowKeys: selectedRow
-                    ? [
-                        selectedRow.slZapiskaId ??
-                          selectedRow.komplektovkaId ??
-                          selectedRow.number,
-                      ]
+                    ? [getTableRowKey(selectedRow)]
                     : [],
+
                   onChange: (_, rows) => {
                     handleRowSelect(rows[0] || null);
                   },
@@ -637,6 +796,7 @@ export default function App() {
                     handleRowSelect(record);
                     loadAssemblyPreview(record);
                   },
+
                   onClick: () => handleRowSelect(record),
                 })}
                 locale={{
@@ -663,7 +823,9 @@ export default function App() {
         <section className="panel assembly-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>Состав КВ</Title>
+              <Title level={5}>
+                Состав КВ
+              </Title>
 
               <Text type="secondary">
                 Предпросмотр исходной структуры PDM
@@ -680,6 +842,7 @@ export default function App() {
             ) : assemblyLoading ? (
               <div className="assembly-loading">
                 <Spin />
+
                 <Text type="secondary">
                   Загрузка состава из PDM...
                 </Text>
@@ -719,16 +882,20 @@ export default function App() {
         </section>
       </main>
 
-      {/* Нижняя область для будущего маршрута согласования */}
       <footer className="workflow-placeholder">
         <div>
-          <Text strong>Маршрут проработки</Text>
+          <Text strong>
+            Маршрут проработки
+          </Text>
+
           <Text type="secondary">
             Данные маршрута появятся после реализации соответствующего API
           </Text>
         </div>
 
-        <Tag>Не реализовано</Tag>
+        <Tag>
+          Не реализовано
+        </Tag>
       </footer>
     </div>
   );
