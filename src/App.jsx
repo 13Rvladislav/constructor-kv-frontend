@@ -1,11 +1,12 @@
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
-
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
+  Descriptions,
   Empty,
   Input,
+  Modal,
   Spin,
   Table,
   Tag,
@@ -17,6 +18,7 @@ import {
 import {
   AppstoreOutlined,
   BranchesOutlined,
+  CheckCircleOutlined,
   FileSearchOutlined,
   FolderOutlined,
   ReloadOutlined,
@@ -37,153 +39,42 @@ const STATUS_COLORS = {
   REJECTED: 'error',
 };
 
+const STATUS_LABELS = {
+  NEW: 'Новая',
+  CREATED: 'Создана',
+  IN_PROGRESS: 'В работе',
+  AGREED: 'Согласована',
+  APPROVED: 'Утверждена',
+  CANCELLED: 'Отменена',
+  REJECTED: 'Отклонена',
+};
+
+const valueOrDash = (value) =>
+  value === null || value === undefined || value === '' ? '—' : value;
+
+/** Уникальный ключ строки таблицы. slZapiskaId может повторяться у нескольких строк. */
+function getTableRowKey(record, index = 0) {
+  if (record?.number !== null && record?.number !== undefined) {
+    return `row-${record.number}`;
+  }
+
+  return [
+    'row',
+    record?.slZapiskaId ?? 'no-sl',
+    record?.specifId ?? 'no-spec',
+    record?.komplektovkaId ?? 'no-kv',
+    index,
+  ].join('-');
+}
+
 function getStatusColor(status) {
   if (!status) return 'default';
-
   return STATUS_COLORS[String(status).toUpperCase()] || 'default';
 }
 
 function getStatusLabel(status) {
   if (!status) return 'Не указан';
-
-  const labels = {
-    NEW: 'Новая',
-    CREATED: 'Создана',
-    IN_PROGRESS: 'В работе',
-    AGREED: 'Согласована',
-    APPROVED: 'Утверждена',
-    CANCELLED: 'Отменена',
-    REJECTED: 'Отклонена',
-  };
-
-  return labels[String(status).toUpperCase()] || status;
-}
-
-/**
- * Формирование дерева:
- *
- * Тема
- *   └── Изделие
- *         └── Группа
- *
- * Важно:
- * ID группы может повторяться у разных изделий.
- * Поэтому ключ группы должен включать ID темы и изделия.
- */
-function getTreeData(temas, searchValue = '') {
-  const normalizedSearch = searchValue
-    .trim()
-    .toLocaleLowerCase('ru-RU');
-
-  return (temas || [])
-    .map((tema) => {
-      const izdelia = (tema.izdelia || [])
-        .map((izdelie) => {
-          const designation = String(izdelie.name || '').trim();
-          const description = String(izdelie.fullName || '').trim();
-
-          const productLabel = [
-            designation,
-            description,
-          ]
-            .filter(Boolean)
-            .join(' — ') || `Изделие ${izdelie.id}`;
-
-          const productMatches =
-            !normalizedSearch ||
-            productLabel
-              .toLocaleLowerCase('ru-RU')
-              .includes(normalizedSearch) ||
-            String(izdelie.id).includes(normalizedSearch);
-
-          const groupes = (izdelie.groupes || [])
-            .map((groupe) => ({
-              title: groupe.name || `Группа ${groupe.id}`,
-
-              key: `group-${tema.id}-${izdelie.id}-${groupe.id}`,
-
-              icon: <FolderOutlined />,
-
-              isLeaf: true,
-
-              nodeType: 'group',
-
-              data: {
-                temaId: tema.id,
-                izdelieId: izdelie.id,
-                groupeId: groupe.id,
-
-                temaName: tema.name,
-                izdelieName: productLabel,
-                groupeName: groupe.name,
-              },
-            }))
-            .filter((groupe) => {
-              if (!normalizedSearch || productMatches) {
-                return true;
-              }
-
-              return String(groupe.title)
-                .toLocaleLowerCase('ru-RU')
-                .includes(normalizedSearch);
-            });
-
-          if (!productMatches && groupes.length === 0) {
-            return null;
-          }
-
-          return {
-            title: (
-              <span className="tree-product-title">
-                <Text strong>
-                  {designation || `Изделие ${izdelie.id}`}
-                </Text>
-
-                {description && (
-                  <Text type="secondary">
-                    {' — '}
-                    {description}
-                  </Text>
-                )}
-              </span>
-            ),
-
-            key: `product-${tema.id}-${izdelie.id}`,
-
-            icon: <AppstoreOutlined />,
-
-            children: groupes,
-
-            nodeType: 'product',
-          };
-        })
-        .filter(Boolean);
-
-      const temaMatches =
-        !normalizedSearch ||
-        String(tema.name || '')
-          .toLocaleLowerCase('ru-RU')
-          .includes(normalizedSearch) ||
-        String(tema.indeksKd ?? '')
-          .includes(normalizedSearch);
-
-      if (!temaMatches && izdelia.length === 0) {
-        return null;
-      }
-
-      return {
-        title: tema.name || `Тема ${tema.id}`,
-
-        key: `tema-${tema.id}`,
-
-        icon: <BranchesOutlined />,
-
-        children: izdelia,
-
-        nodeType: 'tema',
-      };
-    })
-    .filter(Boolean);
+  return STATUS_LABELS[String(status).toUpperCase()] || status;
 }
 
 function formatDate(value) {
@@ -198,34 +89,114 @@ function formatDate(value) {
   return date.toLocaleDateString('ru-RU');
 }
 
-function renderValue(value) {
-  return value === null || value === undefined || value === ''
-    ? '—'
-    : value;
+function getTreeData(temas, searchValue = '') {
+  const search = searchValue.trim().toLowerCase();
+
+  return (temas || [])
+    .map((tema) => {
+      const izdelia = (tema.izdelia || [])
+        .map((izdelie) => {
+          const groupes = (izdelie.groupes || [])
+            .filter((groupe) => {
+              if (!search) return true;
+
+              return String(groupe.name || '')
+                .toLowerCase()
+                .includes(search);
+            })
+            .map((groupe) => ({
+              title: groupe.name || `Группа ${groupe.id}`,
+              key: `group-${tema.id}-${izdelie.id}-${groupe.id}`,
+              icon: <FolderOutlined />,
+              isLeaf: true,
+              nodeType: 'group',
+              data: {
+                temaId: tema.id,
+                izdelieId: izdelie.id,
+                groupeId: groupe.id,
+                temaName: tema.name,
+                izdelieName: izdelie.fullName || izdelie.name,
+                groupeName: groupe.name,
+              },
+            }));
+
+          const designation = String(izdelie.name || '');
+          const fullName = String(izdelie.fullName || '');
+
+          const matches =
+            !search ||
+            designation.toLowerCase().includes(search) ||
+            fullName.toLowerCase().includes(search);
+
+          if (!matches && groupes.length === 0) {
+            return null;
+          }
+
+          return {
+            title: (
+              <div className="tree-product-title">
+                <span className="tree-product-designation">
+                  {designation || `Изделие ${izdelie.id}`}
+                </span>
+                {fullName && fullName !== designation && (
+                  <span className="tree-product-name">{fullName}</span>
+                )}
+              </div>
+            ),
+            key: `product-${tema.id}-${izdelie.id}`,
+            icon: <AppstoreOutlined />,
+            children: groupes,
+            nodeType: 'product',
+          };
+        })
+        .filter(Boolean);
+
+      const temaMatches =
+        !search ||
+        String(tema.name || '').toLowerCase().includes(search);
+
+      if (!temaMatches && izdelia.length === 0) {
+        return null;
+      }
+
+      return {
+        title: tema.name || `Тема ${tema.id}`,
+        key: `tema-${tema.id}`,
+        icon: <BranchesOutlined />,
+        children: izdelia,
+        nodeType: 'tema',
+      };
+    })
+    .filter(Boolean);
 }
 
-/**
- * Отображение элемента сборочной структуры PDM.
- */
-function AssemblyNode({ node }) {
-  const hasChildren = node.children?.length > 0;
+function countAssemblyNodes(nodes = []) {
+  return nodes.reduce(
+    (total, node) =>
+      total + 1 + countAssemblyNodes(node.children || []),
+    0,
+  );
+}
+
+function AssemblyNode({ node, preview = false }) {
+  const children = node.children || [];
 
   return (
-    <div className="assembly-node">
+    <div className={`assembly-node ${preview ? 'assembly-node-preview' : ''}`}>
       <div className="assembly-node-main">
         <div className="assembly-node-info">
           <Text className="assembly-node-design">
-            {renderValue(node.obozn)}
+            {valueOrDash(node.obozn)}
           </Text>
 
           <Text className="assembly-node-name">
-            {renderValue(node.naim)}
+            {valueOrDash(node.naim)}
           </Text>
         </div>
 
         <div className="assembly-node-meta">
           <Text type="secondary">
-            Кол-во: {renderValue(node.quantity)}
+            Кол-во: {valueOrDash(node.quantity)}
           </Text>
 
           {node.massa !== null && node.massa !== undefined && (
@@ -235,31 +206,29 @@ function AssemblyNode({ node }) {
           )}
 
           {node.level !== null && node.level !== undefined && (
-            <Tag bordered={false}>
-              Уровень {node.level}
-            </Tag>
+            <Tag bordered={false}>Уровень {node.level}</Tag>
           )}
         </div>
       </div>
 
-      {node.material && (
-        <div className="assembly-node-extra">
-          <Text type="secondary">
-            Материал: {node.material}
-          </Text>
-        </div>
-      )}
+      {(node.material || node.note) && (
+        <div className="assembly-node-details">
+          {node.material && (
+            <Text type="secondary">
+              Материал: {node.material}
+            </Text>
+          )}
 
-      {node.note && (
-        <div className="assembly-node-extra">
-          <Text type="secondary">
-            Примечание: {node.note}
-          </Text>
+          {node.note && (
+            <Text type="secondary">
+              Примечание: {node.note}
+            </Text>
+          )}
         </div>
       )}
 
       {node.fitsSeries !== null && node.fitsSeries !== undefined && (
-        <div className="assembly-node-extra">
+        <div className="assembly-node-details">
           <Tag color={node.fitsSeries ? 'success' : 'warning'}>
             {node.fitsSeries
               ? 'Соответствует серии'
@@ -267,33 +236,30 @@ function AssemblyNode({ node }) {
           </Tag>
 
           {node.fitReason && (
-            <Text type="secondary">
-              {node.fitReason}
-            </Text>
+            <Text type="secondary">{node.fitReason}</Text>
           )}
         </div>
       )}
 
       {node.series?.length > 0 && (
         <div className="assembly-series">
-          <Text type="secondary">
-            Серии:
-          </Text>
+          <Text type="secondary">Серии:</Text>
 
           {node.series.map((series, index) => (
             <Tag key={`${node.id}-series-${index}`}>
-              {series.mini ?? '—'} – {series.maxi ?? '—'}
+              {valueOrDash(series.mini)} – {valueOrDash(series.maxi)}
             </Tag>
           ))}
         </div>
       )}
 
-      {hasChildren && (
+      {children.length > 0 && (
         <div className="assembly-node-children">
-          {node.children.map((child, index) => (
+          {children.map((child, index) => (
             <AssemblyNode
               key={child.id ?? `${node.id}-${index}`}
               node={child}
+              preview={preview}
             />
           ))}
         </div>
@@ -305,24 +271,25 @@ function AssemblyNode({ node }) {
 export default function App() {
   const [messageApi, contextHolder] = message.useMessage();
 
-  // Дерево PDM
   const [treeData, setTreeData] = useState([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [treeSearch, setTreeSearch] = useState('');
-
-  const [selectedGroup, setSelectedGroup] = useState(null);
   const [expandedKeys, setExpandedKeys] = useState([]);
+  const [selectedGroup, setSelectedGroup] = useState(null);
 
-  // Таблица КВ
   const [tableData, setTableData] = useState([]);
   const [groupInfo, setGroupInfo] = useState(null);
   const [tableLoading, setTableLoading] = useState(false);
-
   const [selectedRow, setSelectedRow] = useState(null);
 
-  // Состав PDM
   const [assemblyData, setAssemblyData] = useState([]);
   const [assemblyLoading, setAssemblyLoading] = useState(false);
+  const [assemblySpecifId, setAssemblySpecifId] = useState(null);
+  const [assemblyLoadingSpecifId, setAssemblyLoadingSpecifId] = useState(null);
+  const assemblyRequestRef = useRef(0);
+
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [formLoading, setFormLoading] = useState(false);
 
   const [globalError, setGlobalError] = useState(null);
 
@@ -331,84 +298,67 @@ export default function App() {
     [treeData, treeSearch],
   );
 
-  const treeStatistics = useMemo(() => {
-    const temas = treeData.length;
+  const selectedTreeKey = selectedGroup
+    ? `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`
+    : null;
 
-    let izdelia = 0;
-    let groupes = 0;
-
-    treeData.forEach((tema) => {
-      const products = tema.izdelia || [];
-
-      izdelia += products.length;
-
-      products.forEach((product) => {
-        groupes += (product.groupes || []).length;
-      });
-    });
-
-    return {
-      temas,
-      izdelia,
-      groupes,
-    };
-  }, [treeData]);
-
-  /**
-   * Загрузка дерева PDM.
-   */
   const loadTree = useCallback(async () => {
     setTreeLoading(true);
     setGlobalError(null);
 
     try {
       const response = await treeApi.getFullTree();
-
-      const temas = Array.isArray(response?.temas)
-        ? response.temas
-        : [];
+      const temas = response?.temas || [];
 
       setTreeData(temas);
 
       if (temas.length > 0) {
-        setExpandedKeys([`tema-${temas[0].id}`]);
+        setExpandedKeys((current) =>
+          current.length > 0 ? current : [`tema-${temas[0].id}`],
+        );
       }
     } catch (error) {
       const errorMessage =
         error?.message || 'Не удалось загрузить дерево изделий';
 
       setGlobalError(errorMessage);
-
       messageApi.error(errorMessage);
     } finally {
       setTreeLoading(false);
     }
   }, [messageApi]);
 
-  /**
-   * Загрузка таблицы комплектовок выбранной группы.
-   */
   const loadTable = useCallback(
-    async (group) => {
+    async (group, options = {}) => {
       if (!group) return;
 
       setTableLoading(true);
-
       setTableData([]);
       setGroupInfo(null);
       setSelectedRow(null);
       setAssemblyData([]);
+      setAssemblySpecifId(null);
+      setAssemblyLoadingSpecifId(null);
+      assemblyRequestRef.current += 1;
+      setAssemblyLoading(false);
 
       try {
         const response = await kvApi.getTable(group);
 
-        setTableData(
-          Array.isArray(response?.rows)
-            ? response.rows
-            : [],
-        );
-
+        const rows = response?.rows || [];
+        setTableData(rows);
         setGroupInfo(response?.groupInfo || null);
+
+        if (options.keepSelection && options.selectedSlZapiskaId) {
+          const refreshedRow = rows.find(
+            (row) =>
+              row.slZapiskaId === options.selectedSlZapiskaId,
+          );
+
+          if (refreshedRow) {
+            setSelectedRow(refreshedRow);
+          }
+        }
       } catch (error) {
         messageApi.error(
           error?.message || 'Не удалось загрузить таблицу комплектовок',
@@ -420,38 +370,51 @@ export default function App() {
     [messageApi],
   );
 
-  /**
-   * Загрузка состава спецификации PDM.
-   */
   const loadAssemblyPreview = useCallback(
     async (row) => {
       if (!row?.specifId) {
         setAssemblyData([]);
-
         messageApi.warning(
           'Для выбранной записи отсутствует идентификатор спецификации',
         );
-
-        return;
+        return false;
       }
 
+      const requestId = ++assemblyRequestRef.current;
+      const specifId = row.specifId;
+
       setAssemblyLoading(true);
+      setAssemblyLoadingSpecifId(specifId);
+      setAssemblySpecifId(null);
       setAssemblyData([]);
 
       try {
-        const response = await kvApi.getAssemblyPreview(row.specifId);
+        const response = await kvApi.getAssemblyPreview(specifId);
 
-        setAssemblyData(
-          Array.isArray(response)
-            ? response
-            : [],
-        );
+        const nodes = Array.isArray(response)
+          ? response
+          : response?.items || response?.elements || [];
+
+        // Не даём более старому запросу перезаписать состав другой строки.
+        if (requestId !== assemblyRequestRef.current) {
+          return false;
+        }
+
+        setAssemblyData(nodes);
+        setAssemblySpecifId(specifId);
+        return true;
       } catch (error) {
-        messageApi.error(
-          error?.message || 'Не удалось загрузить состав из PDM',
-        );
+        if (requestId === assemblyRequestRef.current) {
+          messageApi.error(
+            error?.message || 'Не удалось загрузить состав из PDM',
+          );
+        }
+        return false;
       } finally {
-        setAssemblyLoading(false);
+        if (requestId === assemblyRequestRef.current) {
+          setAssemblyLoading(false);
+          setAssemblyLoadingSpecifId(null);
+        }
       }
     },
     [messageApi],
@@ -461,9 +424,6 @@ export default function App() {
     loadTree();
   }, [loadTree]);
 
-  /**
-   * Обработка выбора узла дерева.
-   */
   const handleTreeSelect = (keys, info) => {
     if (!keys.length) return;
 
@@ -473,46 +433,115 @@ export default function App() {
       return;
     }
 
-    const group = node.data;
-
-    setSelectedGroup(group);
-
-    loadTable(group);
+    setSelectedGroup(node.data);
+    loadTable(node.data);
   };
 
-  /**
-   * Выбор строки таблицы.
-   */
   const handleRowSelect = (record) => {
-    setSelectedRow(record);
-    setAssemblyData([]);
+    setSelectedRow(record || null);
+
+    if (!record) {
+      assemblyRequestRef.current += 1;
+      setAssemblyData([]);
+      setAssemblySpecifId(null);
+      setAssemblyLoadingSpecifId(null);
+      setAssemblyLoading(false);
+      return;
+    }
+
+    // Правая панель состава обновляется сразу при выборе строки.
+    // Если состав этой спецификации уже загружен или загружается — второй запрос не нужен.
+    if (
+      record.specifId &&
+      assemblySpecifId !== record.specifId &&
+      assemblyLoadingSpecifId !== record.specifId
+    ) {
+      loadAssemblyPreview(record);
+    } else if (!record.specifId) {
+      setAssemblyData([]);
+      setAssemblySpecifId(null);
+      messageApi.warning(
+        'Для выбранной записи отсутствует идентификатор спецификации',
+      );
+    }
   };
 
-  /**
-   * Открытие предпросмотра PDM.
-   */
-  const handleOpenPreview = () => {
-    if (!selectedRow) {
+  const handleOpenPreview = async (row) => {
+    // При вызове из onClick React передаёт MouseEvent.
+    // В таком случае используем выбранную запись, а не объект события.
+    const targetRow =
+      row &&
+      typeof row === 'object' &&
+      ('slZapiskaId' in row || 'specifId' in row || 'number' in row)
+        ? row
+        : selectedRow;
+
+    if (!targetRow) {
       messageApi.warning('Сначала выбери запись в таблице');
       return;
     }
 
-    loadAssemblyPreview(selectedRow);
+    // При двойном щелчке можно передать строку напрямую.
+    if (targetRow !== selectedRow) {
+      setSelectedRow(targetRow);
+    }
+
+    setPreviewOpen(true);
+
+    if (
+      !targetRow.specifId ||
+      (assemblySpecifId !== targetRow.specifId &&
+        assemblyLoadingSpecifId !== targetRow.specifId)
+    ) {
+      await loadAssemblyPreview(targetRow);
+    }
   };
 
-  /**
-   * Уникальный ключ строки таблицы.
-   *
-   * Один ID служебной записки может встречаться
-   * с несколькими ID спецификаций.
-   */
-  const getTableRowKey = (record) => {
-    return [
-      record.slZapiskaId ?? 'no-sl',
-      record.specifId ?? 'no-specif',
-      record.komplektovkaId ?? 'no-kv',
-      record.number ?? 'no-number',
-    ].join('-');
+  const handleClosePreview = () => {
+    if (formLoading) return;
+    setPreviewOpen(false);
+  };
+
+  const handleFormKv = async () => {
+    if (!selectedRow) {
+      messageApi.warning('Не выбрана запись для формирования КВ');
+      return;
+    }
+
+    if (!selectedRow.slZapiskaId || !selectedRow.specifId) {
+      messageApi.error(
+        'Для формирования КВ необходимы slZapiskaId и specifId',
+      );
+      return;
+    }
+
+    if (selectedRow.hasKv || selectedRow.komplektovkaId) {
+      messageApi.warning('Для этой записи КВ уже сформирована');
+      return;
+    }
+
+    setFormLoading(true);
+
+    try {
+      await kvApi.form({
+        slZapiskaId: selectedRow.slZapiskaId,
+        specifId: selectedRow.specifId,
+      });
+
+      messageApi.success('Комплектовочная ведомость сформирована');
+      setPreviewOpen(false);
+
+      await loadTable(selectedGroup, {
+        keepSelection: true,
+        selectedSlZapiskaId: selectedRow.slZapiskaId,
+      });
+    } catch (error) {
+      messageApi.error(
+        error?.message || 'Не удалось сформировать комплектовочную ведомость',
+      );
+    } finally {
+      setFormLoading(false);
+    }
   };
 
   const columns = [
@@ -529,7 +558,7 @@ export default function App() {
       key: 'slZapiskaObozn',
       width: 180,
       ellipsis: true,
-      render: renderValue,
+      render: valueOrDash,
     },
     {
       title: 'Обозначение КВ',
@@ -541,9 +570,7 @@ export default function App() {
         value ? (
           <Text strong>{value}</Text>
         ) : (
-          <Text type="secondary">
-            Не сформирована
-          </Text>
+          <Text type="secondary">Не сформирована</Text>
         ),
     },
     {
@@ -552,7 +579,7 @@ export default function App() {
       key: 'parentKvDesign',
       width: 160,
       ellipsis: true,
-      render: renderValue,
+      render: valueOrDash,
     },
     {
       title: 'Дата согласования',
@@ -582,7 +609,7 @@ export default function App() {
         value ? (
           <Tag color="success">Да</Tag>
         ) : (
-          <Tag color="default">Нет</Tag>
+          <Tag>Нет</Tag>
         ),
     },
     {
@@ -595,16 +622,18 @@ export default function App() {
         value ? (
           <Tag color="success">Есть</Tag>
         ) : (
-          <Tag color="default">Нет</Tag>
+          <Tag>Нет</Tag>
         ),
     },
   ];
 
   const selectedGroupTitle = groupInfo
     ? [
-        groupInfo.temaName,
-        groupInfo.izdelieName,
-        `Группа ${groupInfo.groupeId}`,
+        groupInfo.temaName || selectedGroup?.temaName,
+        groupInfo.izdelieName || selectedGroup?.izdelieName,
+        groupInfo.groupeId
+          ? `Группа ${groupInfo.groupeId}`
+          : selectedGroup?.groupeName,
       ]
         .filter(Boolean)
         .join(' / ')
@@ -618,11 +647,20 @@ export default function App() {
           .join(' / ')
       : 'Группа не выбрана';
 
-  const selectedTreeKeys = selectedGroup
-    ? [
-        `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`,
-      ]
-    : [];
+  const selectedRowIndex = selectedRow ? tableData.indexOf(selectedRow) : -1;
+  const selectedRowKey =
+    selectedRow && selectedRowIndex >= 0
+      ? getTableRowKey(selectedRow, selectedRowIndex)
+      : null;
+
+  const canFormKv =
+    selectedRow &&
+    !selectedRow.hasKv &&
+    !selectedRow.komplektovkaId &&
+    selectedRow.slZapiskaId &&
+    selectedRow.specifId;
+
+  const assemblyCount = countAssemblyNodes(assemblyData);
 
   return (
     <div className="app">
@@ -638,7 +676,6 @@ export default function App() {
             <Title level={4} className="app-title">
               Конструктор КВ
             </Title>
-
             <Text type="secondary" className="app-subtitle">
               Система управления комплектовками
             </Text>
@@ -671,17 +708,12 @@ export default function App() {
       )}
 
       <main className="workspace">
-        {/* Левая панель: дерево */}
+        {/* ПАНЕЛЬ 1. ДЕРЕВО */}
         <section className="panel tree-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>
-                Структура изделий
-              </Title>
-
-              <Text type="secondary">
-                Темы, изделия и группы
-              </Text>
+              <Title level={5}>Структура изделий</Title>
+              <Text type="secondary">Темы, изделия и группы</Text>
             </div>
           </div>
 
@@ -705,7 +737,7 @@ export default function App() {
                   expandedKeys={expandedKeys}
                   onExpand={setExpandedKeys}
                   onSelect={handleTreeSelect}
-                  selectedKeys={selectedTreeKeys}
+                  selectedKeys={selectedTreeKey ? [selectedTreeKey] : []}
                 />
               ) : (
                 !treeLoading && (
@@ -719,31 +751,23 @@ export default function App() {
           </div>
 
           <div className="panel-footer">
+            <Text type="secondary">Тем: {treeData.length}</Text>
             <Text type="secondary">
-              Тем: {treeStatistics.temas}
-            </Text>
-
-            <Text type="secondary">
-              Изделий: {treeStatistics.izdelia}
-            </Text>
-
-            <Text type="secondary">
-              Групп: {treeStatistics.groupes}
+              Изделий:{' '}
+              {treeData.reduce(
+                (sum, tema) => sum + (tema.izdelia?.length || 0),
+                0,
+              )}
             </Text>
           </div>
         </section>
 
-        {/* Центральная панель: таблица */}
+        {/* ПАНЕЛЬ 2. ТАБЛИЦА */}
         <section className="panel table-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>
-                Комплектовки и служебные записки
-              </Title>
-
-              <Text type="secondary">
-                {selectedGroupTitle}
-              </Text>
+              <Title level={5}>Комплектовки и служебные записки</Title>
+              <Text type="secondary">{selectedGroupTitle}</Text>
             </div>
 
             <div className="panel-header-actions">
@@ -751,10 +775,9 @@ export default function App() {
                 icon={<FileSearchOutlined />}
                 type="primary"
                 disabled={!selectedRow}
-                onClick={handleOpenPreview}
-                loading={assemblyLoading}
+                onClick={() => handleOpenPreview()}
               >
-                Состав PDM
+                Предпросмотр
               </Button>
             </div>
           </div>
@@ -782,22 +805,14 @@ export default function App() {
                 scroll={{ x: 1100 }}
                 rowSelection={{
                   type: 'radio',
-
-                  selectedRowKeys: selectedRow
-                    ? [getTableRowKey(selectedRow)]
-                    : [],
-
+                  selectedRowKeys: selectedRowKey ? [selectedRowKey] : [],
                   onChange: (_, rows) => {
                     handleRowSelect(rows[0] || null);
                   },
                 }}
                 onRow={(record) => ({
-                  onDoubleClick: () => {
-                    handleRowSelect(record);
-                    loadAssemblyPreview(record);
-                  },
-
                   onClick: () => handleRowSelect(record),
+                  onDoubleClick: () => handleOpenPreview(record),
                 })}
                 locale={{
                   emptyText: 'В выбранной группе нет записей',
@@ -807,30 +822,31 @@ export default function App() {
           </div>
 
           <div className="panel-footer table-footer">
-            <Text type="secondary">
-              Записей: {tableData.length}
-            </Text>
+            <Text type="secondary">Записей: {tableData.length}</Text>
 
             {selectedRow && (
               <Text type="secondary">
-                Выбрана запись № {renderValue(selectedRow.number)}
+                Выбрана запись № {valueOrDash(selectedRow.number)}
               </Text>
             )}
           </div>
         </section>
 
-        {/* Правая панель: состав */}
+        {/* ПАНЕЛЬ 3. СОСТАВ */}
         <section className="panel assembly-panel">
           <div className="panel-header">
             <div>
-              <Title level={5}>
-                Состав КВ
-              </Title>
-
-              <Text type="secondary">
-                Предпросмотр исходной структуры PDM
-              </Text>
+              <Title level={5}>Состав спецификации</Title>
+              <Text type="secondary">Исходная структура PDM</Text>
             </div>
+
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              disabled={!selectedRow}
+              loading={assemblyLoading}
+              onClick={() => loadAssemblyPreview(selectedRow)}
+            />
           </div>
 
           <div className="assembly-content">
@@ -842,10 +858,7 @@ export default function App() {
             ) : assemblyLoading ? (
               <div className="assembly-loading">
                 <Spin />
-
-                <Text type="secondary">
-                  Загрузка состава из PDM...
-                </Text>
+                <Text type="secondary">Загрузка состава из PDM...</Text>
               </div>
             ) : assemblyData.length > 0 ? (
               <div className="assembly-tree">
@@ -864,9 +877,9 @@ export default function App() {
                 <Button
                   type="primary"
                   icon={<FileSearchOutlined />}
-                  onClick={handleOpenPreview}
+                  onClick={() => loadAssemblyPreview(selectedRow)}
                 >
-                  Загрузить состав PDM
+                  Загрузить состав
                 </Button>
               </Empty>
             )}
@@ -875,7 +888,7 @@ export default function App() {
           <div className="panel-footer assembly-footer">
             <Text type="secondary">
               {assemblyData.length > 0
-                ? `Корневых элементов: ${assemblyData.length}`
+                ? `Элементов в составе: ${assemblyCount}`
                 : 'Ожидание данных'}
             </Text>
           </div>
@@ -884,19 +897,162 @@ export default function App() {
 
       <footer className="workflow-placeholder">
         <div>
-          <Text strong>
-            Маршрут проработки
-          </Text>
-
+          <Text strong>Маршрут проработки</Text>
           <Text type="secondary">
             Данные маршрута появятся после реализации соответствующего API
           </Text>
         </div>
-
-        <Tag>
-          Не реализовано
-        </Tag>
+        <Tag>Не реализовано</Tag>
       </footer>
+
+      {/* МОДАЛЬНОЕ ОКНО ПРЕДПРОСМОТРА И ФОРМИРОВАНИЯ */}
+      <Modal
+        title={
+          <div className="preview-modal-title">
+            <div>
+              <Title level={5}>Предпросмотр комплектовочной ведомости</Title>
+              <Text type="secondary">
+                Проверка состава перед формированием КВ
+              </Text>
+            </div>
+            {selectedRow && (
+              <Tag color="blue">
+                Запись № {valueOrDash(selectedRow.number)}
+              </Tag>
+            )}
+          </div>
+        }
+        open={previewOpen}
+        onCancel={handleClosePreview}
+        width={1200}
+        centered
+        destroyOnHidden
+        maskClosable={!formLoading}
+        closable={!formLoading}
+        footer={[
+          <Button
+            key="cancel"
+            onClick={handleClosePreview}
+            disabled={formLoading}
+          >
+            Отмена
+          </Button>,
+          <Button
+            key="form"
+            type="primary"
+            icon={<CheckCircleOutlined />}
+            loading={formLoading}
+            disabled={!canFormKv || assemblyLoading || assemblyData.length === 0}
+            onClick={handleFormKv}
+          >
+            Сформировать КВ
+          </Button>,
+        ]}
+      >
+        {selectedRow && (
+          <div className="preview-modal-content">
+            <Descriptions
+              bordered
+              size="small"
+              column={{ xs: 1, sm: 2, md: 3 }}
+              className="preview-descriptions"
+            >
+              <Descriptions.Item label="Служебная записка">
+                {valueOrDash(selectedRow.slZapiskaObozn)}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="Идентификатор СЗ">
+                {valueOrDash(selectedRow.slZapiskaId)}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="Спецификация">
+                {valueOrDash(selectedRow.specifId)}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="Статус">
+                <Tag color={getStatusColor(selectedRow.status)}>
+                  {getStatusLabel(selectedRow.status)}
+                </Tag>
+              </Descriptions.Item>
+
+              <Descriptions.Item label="Согласование СЗ">
+                {selectedRow.isSlZapAgreed ? (
+                  <Tag color="success">Согласована</Tag>
+                ) : (
+                  <Tag color="warning">Не согласована</Tag>
+                )}
+              </Descriptions.Item>
+
+              <Descriptions.Item label="Состояние КВ">
+                {selectedRow.hasKv || selectedRow.komplektovkaId ? (
+                  <Tag color="success">КВ уже сформирована</Tag>
+                ) : (
+                  <Tag>КВ не сформирована</Tag>
+                )}
+              </Descriptions.Item>
+            </Descriptions>
+
+            <div className="preview-assembly-header">
+              <div>
+                <Title level={5}>Состав изделия</Title>
+                <Text type="secondary">
+                  Иерархия элементов исходной спецификации PDM
+                </Text>
+              </div>
+
+              <Text type="secondary">
+                {assemblyData.length > 0
+                  ? `Корневых элементов: ${assemblyData.length}`
+                  : ''}
+              </Text>
+            </div>
+
+            <div className="preview-assembly-content">
+              {assemblyLoading ? (
+                <div className="assembly-loading">
+                  <Spin size="large" />
+                  <Text type="secondary">Загрузка состава спецификации...</Text>
+                </div>
+              ) : assemblyData.length > 0 ? (
+                <div className="assembly-tree">
+                  {assemblyData.map((node, index) => (
+                    <AssemblyNode
+                      key={node.id ?? `${node.idSpecif}-${index}`}
+                      node={node}
+                      preview
+                    />
+                  ))}
+                </div>
+              ) : (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="Состав спецификации не получен"
+                >
+                  <Button
+                    type="primary"
+                    onClick={() => loadAssemblyPreview(selectedRow)}
+                  >
+                    Повторить загрузку
+                  </Button>
+                </Empty>
+              )}
+            </div>
+
+            {!canFormKv && (
+              <Alert
+                className="preview-form-alert"
+                type="info"
+                showIcon
+                message={
+                  selectedRow.hasKv || selectedRow.komplektovkaId
+                    ? 'Для этой записи комплектовочная ведомость уже сформирована.'
+                    : 'Формирование недоступно: проверь наличие идентификаторов СЗ и спецификации.'
+                }
+              />
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
