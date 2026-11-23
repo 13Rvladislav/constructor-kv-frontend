@@ -3,12 +3,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Button,
-  Descriptions,
   Empty,
   Input,
-  Modal,
   Select,
-  Space,
   Spin,
   Table,
   Tag,
@@ -20,7 +17,6 @@ import {
 import {
   AppstoreOutlined,
   BranchesOutlined,
-  CheckCircleOutlined,
   FileSearchOutlined,
   FolderOutlined,
   ReloadOutlined,
@@ -30,8 +26,8 @@ import {
 } from '@ant-design/icons';
 
 import { treeApi, kvApi } from './api/client';
+import AssemblyPreviewModal from './components/AssemblyPreviewModal';
 import SpecificationStructureModal from './components/SpecificationStructureModal';
-import './styles/table-panel.css';
 
 const { Text, Title } = Typography;
 
@@ -58,7 +54,6 @@ const STATUS_LABELS = {
 const valueOrDash = (value) =>
   value === null || value === undefined || value === '' ? '—' : value;
 
-/** Уникальный ключ строки таблицы. slZapiskaId может повторяться у нескольких строк. */
 function getTableRowKey(record, index = 0) {
   if (record?.number !== null && record?.number !== undefined) {
     return `row-${record.number}`;
@@ -80,7 +75,9 @@ function getStatusColor(status) {
 
 function getStatusLabel(status) {
   if (!status) return 'Не указан';
-  return STATUS_LABELS[String(status).toUpperCase()] || status;
+
+  const normalized = String(status).toUpperCase();
+  return STATUS_LABELS[normalized] || status;
 }
 
 function formatDate(value) {
@@ -144,6 +141,7 @@ function getTreeData(temas, searchValue = '') {
                 <span className="tree-product-designation">
                   {designation || `Изделие ${izdelie.id}`}
                 </span>
+
                 {fullName && fullName !== designation && (
                   <span className="tree-product-name">{fullName}</span>
                 )}
@@ -184,11 +182,11 @@ function countAssemblyNodes(nodes = []) {
   );
 }
 
-function AssemblyNode({ node, preview = false }) {
+function AssemblyNode({ node }) {
   const children = node.children || [];
 
   return (
-    <div className={`assembly-node ${preview ? 'assembly-node-preview' : ''}`}>
+    <div className="assembly-node">
       <div className="assembly-node-main">
         <div className="assembly-node-info">
           <Text className="assembly-node-design">
@@ -218,23 +216,19 @@ function AssemblyNode({ node, preview = false }) {
       </div>
 
       {(node.material || node.note) && (
-        <div className="assembly-node-details">
+        <div className="assembly-node-extra">
           {node.material && (
-            <Text type="secondary">
-              Материал: {node.material}
-            </Text>
+            <Text type="secondary">Материал: {node.material}</Text>
           )}
 
           {node.note && (
-            <Text type="secondary">
-              Примечание: {node.note}
-            </Text>
+            <Text type="secondary">Примечание: {node.note}</Text>
           )}
         </div>
       )}
 
       {node.fitsSeries !== null && node.fitsSeries !== undefined && (
-        <div className="assembly-node-details">
+        <div className="assembly-node-extra">
           <Tag color={node.fitsSeries ? 'success' : 'warning'}>
             {node.fitsSeries
               ? 'Соответствует серии'
@@ -265,13 +259,54 @@ function AssemblyNode({ node, preview = false }) {
             <AssemblyNode
               key={child.id ?? `${node.id}-${index}`}
               node={child}
-              preview={preview}
             />
           ))}
         </div>
       )}
     </div>
   );
+}
+
+function normalizeStatusOptions(serverOptions, rows) {
+  const source =
+    Array.isArray(serverOptions) && serverOptions.length > 0
+      ? serverOptions
+      : rows
+          .map((row) => row.status)
+          .filter(
+            (status) =>
+              status !== null &&
+              status !== undefined &&
+              status !== '',
+          );
+
+  const unique = new Map();
+
+  source.forEach((item) => {
+    const value =
+      typeof item === 'object' && item !== null
+        ? item.value ?? item.status ?? item.code
+        : item;
+
+    if (value === null || value === undefined || value === '') {
+      return;
+    }
+
+    const label =
+      typeof item === 'object' && item !== null
+        ? item.label ?? getStatusLabel(value)
+        : getStatusLabel(value);
+
+    unique.set(String(value), {
+      value: String(value),
+      label,
+    });
+  });
+
+  return [
+    { value: 'ALL', label: 'Все статусы' },
+    ...Array.from(unique.values()),
+  ];
 }
 
 export default function App() {
@@ -287,8 +322,8 @@ export default function App() {
   const [groupInfo, setGroupInfo] = useState(null);
   const [tableLoading, setTableLoading] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
+  const [serverStatusOptions, setServerStatusOptions] = useState([]);
 
-  // Локальный поиск и фильтры центральной таблицы.
   const [tableSearch, setTableSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [kvFilter, setKvFilter] = useState('ALL');
@@ -297,14 +332,13 @@ export default function App() {
   const [assemblyLoading, setAssemblyLoading] = useState(false);
   const [assemblySpecifId, setAssemblySpecifId] = useState(null);
   const [assemblyLoadingSpecifId, setAssemblyLoadingSpecifId] = useState(null);
+
   const assemblyRequestRef = useRef(0);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
 
-  // Новая модалка полной структуры спецификации.
   const [specificationOpen, setSpecificationOpen] = useState(false);
-
   const [globalError, setGlobalError] = useState(null);
 
   const filteredTree = useMemo(
@@ -316,28 +350,26 @@ export default function App() {
     ? `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`
     : null;
 
-const loadTree = useCallback(async () => {
-  setTreeLoading(true);
-  setGlobalError(null);
+  const loadTree = useCallback(async () => {
+    setTreeLoading(true);
+    setGlobalError(null);
 
-  try {
-    const response = await treeApi.getFullTree();
-    const temas = response?.temas || [];
+    try {
+      const response = await treeApi.getFullTree();
+      const temas = response?.temas || [];
 
-    setTreeData(temas);
+      setTreeData(temas);
+      setExpandedKeys([]);
+    } catch (error) {
+      const errorMessage =
+        error?.message || 'Не удалось загрузить дерево изделий';
 
-    // При загрузке и обновлении все узлы дерева закрыты.
-    setExpandedKeys([]);
-  } catch (error) {
-    const errorMessage =
-      error?.message || 'Не удалось загрузить дерево изделий';
-
-    setGlobalError(errorMessage);
-    messageApi.error(errorMessage);
-  } finally {
-    setTreeLoading(false);
-  }
-}, [messageApi]);
+      setGlobalError(errorMessage);
+      messageApi.error(errorMessage);
+    } finally {
+      setTreeLoading(false);
+    }
+  }, [messageApi]);
 
   const loadTable = useCallback(
     async (group, options = {}) => {
@@ -346,27 +378,41 @@ const loadTree = useCallback(async () => {
       setTableLoading(true);
       setTableData([]);
       setGroupInfo(null);
+      setServerStatusOptions([]);
       setSelectedRow(null);
+
       setTableSearch('');
       setStatusFilter('ALL');
       setKvFilter('ALL');
+
       setAssemblyData([]);
       setAssemblySpecifId(null);
       setAssemblyLoadingSpecifId(null);
+
       assemblyRequestRef.current += 1;
       setAssemblyLoading(false);
 
       try {
         const response = await kvApi.getTable(group);
 
-        const rows = response?.rows || [];
+        const rows = Array.isArray(response?.rows)
+          ? response.rows
+          : [];
+
         setTableData(rows);
         setGroupInfo(response?.groupInfo || null);
+
+        setServerStatusOptions(
+          Array.isArray(response?.statusOptions)
+            ? response.statusOptions
+            : [],
+        );
 
         if (options.keepSelection && options.selectedSlZapiskaId) {
           const refreshedRow = rows.find(
             (row) =>
-              row.slZapiskaId === options.selectedSlZapiskaId,
+              String(row.slZapiskaId) ===
+              String(options.selectedSlZapiskaId),
           );
 
           if (refreshedRow) {
@@ -388,9 +434,12 @@ const loadTree = useCallback(async () => {
     async (row) => {
       if (!row?.specifId) {
         setAssemblyData([]);
+        setAssemblySpecifId(null);
+
         messageApi.warning(
           'Для выбранной записи отсутствует идентификатор спецификации',
         );
+
         return false;
       }
 
@@ -409,13 +458,13 @@ const loadTree = useCallback(async () => {
           ? response
           : response?.items || response?.elements || [];
 
-        // Не даём более старому запросу перезаписать состав другой строки.
         if (requestId !== assemblyRequestRef.current) {
           return false;
         }
 
         setAssemblyData(nodes);
         setAssemblySpecifId(specifId);
+
         return true;
       } catch (error) {
         if (requestId === assemblyRequestRef.current) {
@@ -423,6 +472,7 @@ const loadTree = useCallback(async () => {
             error?.message || 'Не удалось загрузить состав из PDM',
           );
         }
+
         return false;
       } finally {
         if (requestId === assemblyRequestRef.current) {
@@ -456,61 +506,55 @@ const loadTree = useCallback(async () => {
 
     if (!record) {
       assemblyRequestRef.current += 1;
+
       setAssemblyData([]);
       setAssemblySpecifId(null);
       setAssemblyLoadingSpecifId(null);
       setAssemblyLoading(false);
+
       return;
     }
 
-    // Правая панель состава обновляется сразу при выборе строки.
-    // Если состав этой спецификации уже загружен или загружается — второй запрос не нужен.
     if (
       record.specifId &&
-      assemblySpecifId !== record.specifId &&
-      assemblyLoadingSpecifId !== record.specifId
+      String(assemblySpecifId) !== String(record.specifId) &&
+      String(assemblyLoadingSpecifId) !== String(record.specifId)
     ) {
       loadAssemblyPreview(record);
     } else if (!record.specifId) {
+      assemblyRequestRef.current += 1;
+
       setAssemblyData([]);
       setAssemblySpecifId(null);
+      setAssemblyLoadingSpecifId(null);
+      setAssemblyLoading(false);
+
       messageApi.warning(
         'Для выбранной записи отсутствует идентификатор спецификации',
       );
     }
   };
 
-  const handleOpenPreview = async (row) => {
-    // При вызове из onClick React передаёт MouseEvent.
-    // В таком случае используем выбранную запись, а не объект события.
-    const targetRow =
-      row &&
-      typeof row === 'object' &&
-      ('slZapiskaId' in row || 'specifId' in row || 'number' in row)
-        ? row
-        : selectedRow;
+  const handleOpenPreview = async (row = null) => {
+    const targetRow = row || selectedRow;
 
     if (!targetRow) {
       messageApi.warning('Сначала выбери запись в таблице');
       return;
     }
 
-    if (targetRow !== selectedRow) {
-      setSelectedRow(targetRow);
-    }
-
+    setSelectedRow(targetRow);
     setPreviewOpen(true);
 
     if (
       !targetRow.specifId ||
-      (assemblySpecifId !== targetRow.specifId &&
-        assemblyLoadingSpecifId !== targetRow.specifId)
+      (String(assemblySpecifId) !== String(targetRow.specifId) &&
+        String(assemblyLoadingSpecifId) !== String(targetRow.specifId))
     ) {
       await loadAssemblyPreview(targetRow);
     }
   };
 
-  // Открытие отдельной модалки полной структуры спецификации.
   const handleOpenSpecification = () => {
     if (!selectedRow) {
       messageApi.warning('Сначала выбери запись в таблице');
@@ -554,6 +598,11 @@ const loadTree = useCallback(async () => {
       return;
     }
 
+    if (assemblyLoading || assemblyData.length === 0) {
+      messageApi.warning('Сначала дождись загрузки состава спецификации');
+      return;
+    }
+
     setFormLoading(true);
 
     try {
@@ -578,27 +627,15 @@ const loadTree = useCallback(async () => {
     }
   };
 
-  // Статусы формируются из фактических значений ответа API.
-  const statusOptions = useMemo(() => {
-    const statuses = [
-      ...new Set(
-        tableData
-          .map((row) => row.status)
-          .filter((status) => status !== null && status !== undefined && status !== ''),
-      ),
-    ];
-
-    return [
-      { value: 'ALL', label: 'Все статусы' },
-      ...statuses.map((status) => ({
-        value: String(status),
-        label: getStatusLabel(status),
-      })),
-    ];
-  }, [tableData]);
+  const statusOptions = useMemo(
+    () => normalizeStatusOptions(serverStatusOptions, tableData),
+    [serverStatusOptions, tableData],
+  );
 
   const filteredTableData = useMemo(() => {
-    const normalizedSearch = tableSearch.trim().toLocaleLowerCase('ru-RU');
+    const normalizedSearch = tableSearch
+      .trim()
+      .toLocaleLowerCase('ru-RU');
 
     return tableData.filter((row) => {
       const searchableValues = [
@@ -620,9 +657,11 @@ const loadTree = useCallback(async () => {
         );
 
       const matchesStatus =
-        statusFilter === 'ALL' || String(row.status) === statusFilter;
+        statusFilter === 'ALL' ||
+        String(row.status) === statusFilter;
 
       const hasKv = Boolean(row.hasKv || row.komplektovkaId);
+
       const matchesKv =
         kvFilter === 'ALL' ||
         (kvFilter === 'HAS_KV' && hasKv) ||
@@ -712,8 +751,8 @@ const loadTree = useCallback(async () => {
       key: 'hasKv',
       width: 75,
       align: 'center',
-      render: (value) =>
-        value ? (
+      render: (value, record) =>
+        value || record.komplektovkaId ? (
           <Tag color="success">Есть</Tag>
         ) : (
           <Tag>Нет</Tag>
@@ -729,30 +768,40 @@ const loadTree = useCallback(async () => {
           ? `Группа ${groupInfo.groupeId}`
           : selectedGroup?.groupeName,
       ]
-        .filter(Boolean)
-        .join(' / ')
+          .filter(Boolean)
+          .join(' / ')
     : selectedGroup
       ? [
           selectedGroup.temaName,
           selectedGroup.izdelieName,
-          selectedGroup.groupeName || `Группа ${selectedGroup.groupeId}`,
+          selectedGroup.groupeName ||
+            `Группа ${selectedGroup.groupeId}`,
         ]
           .filter(Boolean)
           .join(' / ')
       : 'Группа не выбрана';
 
-  const selectedRowIndex = selectedRow ? tableData.indexOf(selectedRow) : -1;
+  const selectedRowIndex = selectedRow
+    ? filteredTableData.findIndex(
+        (row) =>
+          String(row.slZapiskaId) === String(selectedRow.slZapiskaId) &&
+          String(row.specifId) === String(selectedRow.specifId) &&
+          String(row.number) === String(selectedRow.number),
+      )
+    : -1;
+
   const selectedRowKey =
     selectedRow && selectedRowIndex >= 0
       ? getTableRowKey(selectedRow, selectedRowIndex)
       : null;
 
-  const canFormKv =
+  const canFormKv = Boolean(
     selectedRow &&
-    !selectedRow.hasKv &&
-    !selectedRow.komplektovkaId &&
-    selectedRow.slZapiskaId &&
-    selectedRow.specifId;
+      !selectedRow.hasKv &&
+      !selectedRow.komplektovkaId &&
+      selectedRow.slZapiskaId &&
+      selectedRow.specifId,
+  );
 
   const assemblyCount = countAssemblyNodes(assemblyData);
 
@@ -770,6 +819,7 @@ const loadTree = useCallback(async () => {
             <Title level={4} className="app-title">
               Конструктор КВ
             </Title>
+
             <Text type="secondary" className="app-subtitle">
               Система управления комплектовками
             </Text>
@@ -802,7 +852,6 @@ const loadTree = useCallback(async () => {
       )}
 
       <main className="workspace">
-        {/* ПАНЕЛЬ 1. ДЕРЕВО */}
         <section className="panel tree-panel">
           <div className="panel-header">
             <div>
@@ -846,6 +895,7 @@ const loadTree = useCallback(async () => {
 
           <div className="panel-footer">
             <Text type="secondary">Тем: {treeData.length}</Text>
+
             <Text type="secondary">
               Изделий:{' '}
               {treeData.reduce(
@@ -856,11 +906,13 @@ const loadTree = useCallback(async () => {
           </div>
         </section>
 
-        {/* ПАНЕЛЬ 2. ТАБЛИЦА */}
         <section className="panel table-panel">
           <div className="panel-header table-panel-header">
             <div className="table-panel-heading">
-              <Title level={5}>Комплектовки и служебные записки</Title>
+              <Title level={5}>
+                Комплектовки и служебные записки
+              </Title>
+
               <Text type="secondary">{selectedGroupTitle}</Text>
             </div>
 
@@ -884,7 +936,6 @@ const loadTree = useCallback(async () => {
             </div>
           </div>
 
-          {/* ПОИСК И ФИЛЬТРЫ — отдельные строки, не в шапке панели */}
           <div className="table-filter-toolbar">
             <Input
               className="table-search-input"
@@ -903,6 +954,8 @@ const loadTree = useCallback(async () => {
                 onChange={setStatusFilter}
                 disabled={!selectedGroup || tableLoading}
                 options={statusOptions}
+                placeholder="Все статусы"
+                popupMatchSelectWidth={false}
               />
 
               <Select
@@ -915,6 +968,7 @@ const loadTree = useCallback(async () => {
                   { value: 'HAS_KV', label: 'С комплектовкой' },
                   { value: 'NO_KV', label: 'Без комплектовки' },
                 ]}
+                popupMatchSelectWidth={false}
               />
 
               <Button
@@ -931,7 +985,6 @@ const loadTree = useCallback(async () => {
             </div>
           </div>
 
-          {/* ДЕЙСТВИЯ НАД ВЫБРАННОЙ ЗАПИСЬЮ — отдельная строка */}
           <div className="table-action-toolbar">
             <div className="table-secondary-actions">
               <Button
@@ -1018,7 +1071,6 @@ const loadTree = useCallback(async () => {
           </div>
         </section>
 
-        {/* ПАНЕЛЬ 3. СОСТАВ */}
         <section className="panel assembly-panel">
           <div className="panel-header">
             <div>
@@ -1088,164 +1140,27 @@ const loadTree = useCallback(async () => {
             Данные маршрута появятся после реализации соответствующего API
           </Text>
         </div>
+
         <Tag>Не реализовано</Tag>
       </footer>
 
-      {/* НОВАЯ МОДАЛКА ПОЛНОЙ СТРУКТУРЫ СПЕЦИФИКАЦИИ */}
       <SpecificationStructureModal
         open={specificationOpen}
         onClose={handleCloseSpecification}
         specifId={selectedRow?.specifId}
       />
 
-      {/* МОДАЛЬНОЕ ОКНО ПРЕДПРОСМОТРА И ФОРМИРОВАНИЯ */}
-      <Modal
-        title={
-          <div className="preview-modal-title">
-            <div>
-              <Title level={5}>Предпросмотр комплектовочной ведомости</Title>
-              <Text type="secondary">
-                Проверка состава перед формированием КВ
-              </Text>
-            </div>
-            {selectedRow && (
-              <Tag color="blue">
-                Запись № {valueOrDash(selectedRow.number)}
-              </Tag>
-            )}
-          </div>
-        }
+      <AssemblyPreviewModal
         open={previewOpen}
         onCancel={handleClosePreview}
-        width={1200}
-        centered
-        destroyOnHidden
-        maskClosable={!formLoading}
-        closable={!formLoading}
-        footer={[
-          <Button
-            key="cancel"
-            onClick={handleClosePreview}
-            disabled={formLoading}
-          >
-            Отмена
-          </Button>,
-          <Button
-            key="form"
-            type="primary"
-            icon={<CheckCircleOutlined />}
-            loading={formLoading}
-            disabled={!canFormKv || assemblyLoading || assemblyData.length === 0}
-            onClick={handleFormKv}
-          >
-            Сформировать КВ
-          </Button>,
-        ]}
-      >
-        {selectedRow && (
-          <div className="preview-modal-content">
-            <Descriptions
-              bordered
-              size="small"
-              column={{ xs: 1, sm: 2, md: 3 }}
-              className="preview-descriptions"
-            >
-              <Descriptions.Item label="Служебная записка">
-                {valueOrDash(selectedRow.slZapiskaObozn)}
-              </Descriptions.Item>
-
-              <Descriptions.Item label="Идентификатор СЗ">
-                {valueOrDash(selectedRow.slZapiskaId)}
-              </Descriptions.Item>
-
-              <Descriptions.Item label="Спецификация">
-                {valueOrDash(selectedRow.specifId)}
-              </Descriptions.Item>
-
-              <Descriptions.Item label="Статус">
-                <Tag color={getStatusColor(selectedRow.status)}>
-                  {getStatusLabel(selectedRow.status)}
-                </Tag>
-              </Descriptions.Item>
-
-              <Descriptions.Item label="Согласование СЗ">
-                {selectedRow.isSlZapAgreed ? (
-                  <Tag color="success">Согласована</Tag>
-                ) : (
-                  <Tag color="warning">Не согласована</Tag>
-                )}
-              </Descriptions.Item>
-
-              <Descriptions.Item label="Состояние КВ">
-                {selectedRow.hasKv || selectedRow.komplektovkaId ? (
-                  <Tag color="success">КВ уже сформирована</Tag>
-                ) : (
-                  <Tag>КВ не сформирована</Tag>
-                )}
-              </Descriptions.Item>
-            </Descriptions>
-
-            <div className="preview-assembly-header">
-              <div>
-                <Title level={5}>Состав изделия</Title>
-                <Text type="secondary">
-                  Иерархия элементов исходной спецификации PDM
-                </Text>
-              </div>
-
-              <Text type="secondary">
-                {assemblyData.length > 0
-                  ? `Корневых элементов: ${assemblyData.length}`
-                  : ''}
-              </Text>
-            </div>
-
-            <div className="preview-assembly-content">
-              {assemblyLoading ? (
-                <div className="assembly-loading">
-                  <Spin size="large" />
-                  <Text type="secondary">Загрузка состава спецификации...</Text>
-                </div>
-              ) : assemblyData.length > 0 ? (
-                <div className="assembly-tree">
-                  {assemblyData.map((node, index) => (
-                    <AssemblyNode
-                      key={node.id ?? `${node.idSpecif}-${index}`}
-                      node={node}
-                      preview
-                    />
-                  ))}
-                </div>
-              ) : (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="Состав спецификации не получен"
-                >
-                  <Button
-                    type="primary"
-                    onClick={() => loadAssemblyPreview(selectedRow)}
-                  >
-                    Повторить загрузку
-                  </Button>
-                </Empty>
-              )}
-            </div>
-
-            {!canFormKv && (
-              <Alert
-                className="preview-form-alert"
-                type="info"
-                showIcon
-                message={
-                  selectedRow.hasKv || selectedRow.komplektovkaId
-                    ? 'Для этой записи комплектовочная ведомость уже сформирована.'
-                    : 'Формирование недоступно: проверь наличие идентификаторов СЗ и спецификации.'
-                }
-              />
-            )}
-          </div>
-        )}
-      </Modal>
+        onConfirm={handleFormKv}
+        onRefresh={() => loadAssemblyPreview(selectedRow)}
+        loading={assemblyLoading}
+        confirming={formLoading}
+        data={assemblyData}
+        selectedRow={selectedRow}
+        canConfirm={canFormKv}
+      />
     </div>
   );
 }

@@ -132,17 +132,57 @@ export const treeApi = {
 
 export const kvApi = {
   /**
-   * Получить таблицу комплектовок.
+   * Получить таблицу комплектовок с серверной фильтрацией
+   * и пагинацией.
    *
    * GET /api/kvtable
+   *
+   * Параметры:
+   * temaId    - идентификатор темы
+   * izdelieId - идентификатор изделия
+   * groupeId  - идентификатор группы
+   * search    - поисковая строка
+   * status    - статус
+   * hasKv     - наличие КВ
+   * page      - номер страницы
+   * size      - размер страницы
    */
-  getTable: async ({ temaId, izdelieId, groupeId }) => {
+  getTable: async (
+    {
+      temaId,
+      izdelieId,
+      groupeId,
+      search,
+      status,
+      hasKv,
+      page = 0,
+      size = 20,
+    },
+    config = {},
+  ) => {
+    const params = {
+      temaId,
+      izdelieId,
+      groupeId,
+      page,
+      size,
+    };
+
+    if (search?.trim()) {
+      params.search = search.trim();
+    }
+
+    if (status && status !== 'ALL') {
+      params.status = status;
+    }
+
+    if (hasKv !== null && hasKv !== undefined) {
+      params.hasKv = hasKv;
+    }
+
     const response = await apiClient.get('/kvtable', {
-      params: {
-        temaId,
-        izdelieId,
-        groupeId,
-      },
+      params,
+      ...config,
     });
 
     return response.data;
