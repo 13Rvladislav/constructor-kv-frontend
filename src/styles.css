@@ -577,3 +577,295 @@ input {
     gap: 2px;
   }
 }
+
+/* =====================================================
+   TOOLBAR ВТОРОЙ ПАНЕЛИ: ПОИСК, ФИЛЬТРЫ И ОПЕРАЦИИ
+   ===================================================== */
+
+.table-panel > .panel-header {
+  min-height: 70px;
+  padding: 13px 16px;
+  gap: 14px;
+}
+
+.table-panel > .panel-header h5.ant-typography {
+  color: #17243a;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.table-panel > .panel-header .ant-typography-secondary {
+  color: #8491a5;
+  font-size: 11px;
+}
+
+.table-primary-action.ant-btn {
+  height: 36px;
+  padding: 0 16px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 5px rgba(37, 99, 235, 0.16);
+}
+
+/* Поиск и фильтры */
+.table-filter-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 12px 15px;
+  background: #f8fafd;
+  border-bottom: 1px solid #e8edf4;
+}
+
+.table-search-input.ant-input-affix-wrapper {
+  width: 100%;
+  height: 36px;
+  padding: 0 11px;
+  border: 1px solid #dce4ef;
+  border-radius: 7px;
+  background: #fff;
+  box-shadow: none;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+
+.table-search-input.ant-input-affix-wrapper:hover {
+  border-color: #9bb8e9;
+}
+
+.table-search-input.ant-input-affix-wrapper-focused {
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, .10);
+}
+
+.table-search-input .ant-input {
+  font-size: 12px;
+}
+
+.table-search-input .ant-input-prefix {
+  margin-right: 8px;
+  color: #8997aa;
+}
+
+.table-filter-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-filter-select {
+  width: 155px;
+  min-width: 135px;
+}
+
+.table-filter-select .ant-select-selector {
+  height: 34px !important;
+  padding: 0 10px !important;
+  border: 1px solid #dce4ef !important;
+  border-radius: 7px !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+.table-filter-select .ant-select-selection-item,
+.table-filter-select .ant-select-selection-placeholder {
+  line-height: 32px !important;
+  color: #34445b;
+  font-size: 11px;
+}
+
+.table-kv-filter {
+  width: 175px;
+}
+
+.table-reset-button.ant-btn {
+  height: 34px;
+  padding: 0 13px;
+  border-color: #dce4ef;
+  border-radius: 7px;
+  color: #64748b;
+  background: #fff;
+  font-size: 11px;
+}
+
+.table-reset-button.ant-btn:hover:not(:disabled) {
+  color: #2563eb;
+  border-color: #93b4ed;
+  background: #f4f8ff;
+}
+
+/* Кнопки операций */
+.table-action-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 52px;
+  padding: 8px 15px;
+  background: #fff;
+  border-bottom: 1px solid #e8edf4;
+}
+
+.table-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.table-secondary-actions .ant-btn {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 500;
+  box-shadow: none;
+}
+
+.table-danger-action.ant-btn {
+  color: #b93838;
+  border-color: #efcaca;
+  background: #fffafa;
+}
+
+.table-danger-action.ant-btn:disabled {
+  color: #bd8585;
+  border-color: #f0dddd;
+  background: #fffafa;
+  opacity: .78;
+}
+
+.table-neutral-action.ant-btn {
+  color: #53647c;
+  border-color: #dce4ef;
+  background: #fff;
+}
+
+.table-neutral-action.ant-btn:disabled {
+  color: #8a96a7;
+  border-color: #e1e7ef;
+  background: #fafbfd;
+  opacity: .8;
+}
+
+/* Информация о выбранной строке */
+.table-selected-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  border: 1px solid #e3eaf3;
+  border-radius: 6px;
+  color: #718096;
+  background: #f8fafd;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.table-selected-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #3478e5;
+}
+
+/* Таблица */
+.table-panel .table-content {
+  padding: 12px 14px;
+}
+
+.table-panel .table-content .ant-table {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.table-panel .table-content .ant-table-thead > tr > th {
+  height: 40px;
+  padding: 9px 11px;
+  color: #526178;
+  background: #f5f8fc;
+  border-color: #e3eaf2;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.table-panel .table-content .ant-table-tbody > tr > td {
+  height: 42px;
+  padding: 9px 11px;
+  border-color: #e8edf4;
+  font-size: 11px;
+}
+
+.table-panel .table-content .ant-table-tbody > tr:hover > td {
+  background: #f5f8fd !important;
+}
+
+.table-panel .table-content .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: #edf4ff !important;
+}
+
+.table-panel .table-content .ant-pagination {
+  margin: 12px 0 2px;
+}
+
+.table-panel > .table-footer {
+  min-height: 36px;
+  padding: 0 15px;
+  background: #fafbfd;
+  border-top: 1px solid #e9eef5;
+}
+
+.table-panel > .table-footer .ant-typography {
+  color: #8794a7;
+  font-size: 10px;
+}
+
+/* Адаптация панели */
+@media (max-width: 900px) {
+  .table-action-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table-selected-label {
+    align-self: flex-start;
+  }
+
+  .table-filter-controls {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .table-filter-select,
+  .table-kv-filter {
+    width: 100%;
+  }
+
+  .table-reset-button {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+}
+
+@media (max-width: 560px) {
+  .table-secondary-actions {
+    width: 100%;
+  }
+
+  .table-secondary-actions .ant-btn {
+    flex: 1 1 auto;
+  }
+
+  .table-panel > .panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .table-panel > .panel-header .panel-header-actions,
+  .table-primary-action.ant-btn {
+    width: 100%;
+  }
+}

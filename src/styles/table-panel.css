@@ -1,0 +1,129 @@
+/* Компоновка второй панели: шапка, поиск, фильтры и действия — отдельными рядами. */
+.table-panel {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.table-panel-header {
+  min-height: 62px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+}
+
+.table-panel-heading {
+  min-width: 150px;
+  flex: 1 1 auto;
+}
+
+.table-panel-heading h5 {
+  margin: 0 0 3px !important;
+}
+
+.panel-header-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-filter-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 7px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #edf0f4;
+  background: #fff;
+}
+
+.table-search-input {
+  width: 100%;
+}
+
+.table-filter-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-filter-select {
+  width: 150px;
+  min-width: 130px;
+}
+
+.table-kv-filter {
+  width: 175px;
+}
+
+.table-reset-button {
+  flex: 0 0 auto;
+}
+
+.table-action-toolbar {
+  min-height: 44px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  padding: 6px 12px;
+  border-bottom: 1px solid #edf0f4;
+  background: #fafbfc;
+}
+
+.table-secondary-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.table-selected-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: #667085;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.table-selected-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+.table-content {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 10px 12px;
+}
+
+.table-footer {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .table-panel-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .panel-header-actions {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}

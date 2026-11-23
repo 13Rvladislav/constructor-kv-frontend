@@ -26,22 +26,24 @@ import '../styles/assembly-preview.css';
 const { Text, Title } = Typography;
 
 const TYPE_CONFIG = {
-  SB: { label: 'СБ — Сборка', color: 'purple' },
-  СБ: { label: 'СБ — Сборка', color: 'purple' },
-  DET: { label: 'ДЕТ — Деталь', color: 'green' },
-  ДЕТ: { label: 'ДЕТ — Деталь', color: 'green' },
-  ST: { label: 'СТ — Стандартное', color: 'orange' },
-  СТ: { label: 'СТ — Стандартное', color: 'orange' },
-  POK: { label: 'ПОК — Покупное', color: 'magenta' },
-  ПОК: { label: 'ПОК — Покупное', color: 'magenta' },
-  MAT: { label: 'МАТ — Материал', color: 'cyan' },
-  МАТ: { label: 'МАТ — Материал', color: 'cyan' },
+  SB: { label: 'СБОРКА', color: 'purple' },
+  СБ: { label: 'СБОРКА', color: 'purple' },
+  DET: { label: 'ДЕТАЛЬ', color: 'green' },
+  ДЕТ: { label: 'ДЕТАЛЬ', color: 'green' },
+  ST: { label: 'СТАНДАРТНОЕ', color: 'orange' },
+  СТ: { label: 'СТАНДАРТНОЕ', color: 'orange' },
+  POK: { label: 'ПОКУПНОЕ', color: 'magenta' },
+  ПОК: { label: 'ПОКУПНОЕ', color: 'magenta' },
+  MAT: { label: 'МАТЕРИАЛ', color: 'cyan' },
+  МАТ: { label: 'МАТЕРИАЛ', color: 'cyan' },
 };
 
 function valueOrDash(value) {
-  return value === null || value === undefined || value === ''
-    ? '—'
-    : value;
+  if (value === null || value === undefined || value === '') {
+    return '—';
+  }
+
+  return value;
 }
 
 function getNodeType(node) {
@@ -59,10 +61,15 @@ function getNodeType(node) {
     return TYPE_CONFIG[normalized];
   }
 
-  return {
-    label: rawType || 'Не указан',
-    color: 'default',
-  };
+  if (Array.isArray(node.children) && node.children.length > 0) {
+    return { label: 'СБОРКА', color: 'purple' };
+  }
+
+  if (node.material) {
+    return { label: 'ДЕТАЛЬ', color: 'green' };
+  }
+
+  return { label: 'СТАНДАРТНОЕ', color: 'orange' };
 }
 
 function getSeriesLabel(series) {
@@ -77,10 +84,13 @@ function getSeriesLabel(series) {
   const mini = series.mini ?? series.min ?? series.from;
   const maxi = series.maxi ?? series.max ?? series.to;
   const quantity = series.quantity ?? series.count;
+  const massa = series.massa ?? series.mass;
 
   if (mini !== undefined || maxi !== undefined) {
     return `${valueOrDash(mini)}–${valueOrDash(maxi)}${
       quantity !== undefined ? ` × ${quantity}` : ''
+    }${
+      massa !== undefined ? ` ⚖ ${Number(massa).toFixed(2)}` : ''
     }`;
   }
 
@@ -93,11 +103,19 @@ function getSeriesLabel(series) {
   );
 }
 
+/**
+ * Собирает все элементы для статистики.
+ * Вложенность обрабатывается только у сборочных единиц idDivision === 3.
+ */
 function getAllNodes(nodes = []) {
   return nodes.reduce((result, node) => {
     result.push(node);
 
-    if (Array.isArray(node.children) && node.children.length > 0) {
+    if (
+      Number(node.idDivision) === 3 &&
+      Array.isArray(node.children) &&
+      node.children.length > 0
+    ) {
       result.push(...getAllNodes(node.children));
     }
 
@@ -106,14 +124,8 @@ function getAllNodes(nodes = []) {
 }
 
 function getNodeStatus(node) {
-  if (node.fitsSeries === true) {
-    return 'success';
-  }
-
-  if (node.fitsSeries === false) {
-    return 'error';
-  }
-
+  if (node.fitsSeries === true) return 'success';
+  if (node.fitsSeries === false) return 'error';
   return 'default';
 }
 
@@ -121,7 +133,7 @@ function StatusIndicator({ status }) {
   if (status === 'success') {
     return (
       <Tooltip title="Подходит">
-        <CheckCircleFilled className="preview-status-icon preview-status-ok" />
+        <span className="preview-status-dot preview-status-ok" />
       </Tooltip>
     );
   }
@@ -129,27 +141,32 @@ function StatusIndicator({ status }) {
   if (status === 'error') {
     return (
       <Tooltip title="Не подходит">
-        <CloseCircleFilled className="preview-status-icon preview-status-error" />
+        <span className="preview-status-dot preview-status-error" />
       </Tooltip>
     );
   }
 
   return (
     <Tooltip title="Нет проверки">
-      <span className="preview-status-unknown" />
+      <span className="preview-status-dot preview-status-unknown" />
     </Tooltip>
   );
 }
 
 function SeriesList({ series }) {
   if (!Array.isArray(series) || series.length === 0) {
-    return <Text type="secondary" className="preview-no-series">нет серий</Text>;
+    return (
+      <Text type="secondary" className="preview-no-series">
+        нет серий
+      </Text>
+    );
   }
 
   return (
     <div className="preview-series-list">
       {series.map((item, index) => {
         const label = getSeriesLabel(item);
+
         const status =
           typeof item === 'object' && item !== null
             ? item.fitsSeries
@@ -179,7 +196,11 @@ function ElementTypeTag({ node }) {
   const type = getNodeType(node);
 
   return (
-    <Tag color={type.color} bordered={false} className="preview-type-tag">
+    <Tag
+      color={type.color}
+      bordered={false}
+      className="preview-type-tag"
+    >
       {type.label}
     </Tag>
   );
@@ -194,6 +215,7 @@ export default function AssemblyPreviewModal({
   confirming = false,
   data = [],
   selectedRow = null,
+  canConfirm = true,
 }) {
   const [expandedKeys, setExpandedKeys] = useState([]);
 
@@ -202,7 +224,10 @@ export default function AssemblyPreviewModal({
     [data],
   );
 
-  const allNodes = useMemo(() => getAllNodes(nodes), [nodes]);
+  const allNodes = useMemo(
+    () => getAllNodes(nodes),
+    [nodes],
+  );
 
   const statistics = useMemo(() => {
     const suitable = allNodes.filter(
@@ -223,6 +248,10 @@ export default function AssemblyPreviewModal({
     };
   }, [allNodes]);
 
+  /**
+   * Строим дерево таблицы.
+   * Дочерние элементы доступны только у idDivision === 3.
+   */
   const tableData = useMemo(() => {
     const mapNodes = (items, parentKey = '') =>
       items.map((node, index) => {
@@ -232,10 +261,15 @@ export default function AssemblyPreviewModal({
           `${parentKey || 'root'}-${index}`,
         );
 
+        const canExpand =
+          Number(node.idDivision) === 3 &&
+          Array.isArray(node.children) &&
+          node.children.length > 0;
+
         return {
           ...node,
           key,
-          children: Array.isArray(node.children)
+          children: canExpand
             ? mapNodes(node.children, key)
             : undefined,
         };
@@ -244,10 +278,34 @@ export default function AssemblyPreviewModal({
     return mapNodes(nodes);
   }, [nodes]);
 
+  /**
+   * Разворачиваем только сборочные единицы idDivision === 3.
+   */
   const handleExpandAll = () => {
-    setExpandedKeys(allNodes.map((node, index) =>
-      String(node.structureId ?? node.id ?? `root-${index}`),
-    ));
+    const expandableKeys = [];
+
+    const collectKeys = (items, parentKey = '') => {
+      items.forEach((node, index) => {
+        const key = String(
+          node.structureId ??
+          node.id ??
+          `${parentKey || 'root'}-${index}`,
+        );
+
+        const canExpand =
+          Number(node.idDivision) === 3 &&
+          Array.isArray(node.children) &&
+          node.children.length > 0;
+
+        if (canExpand) {
+          expandableKeys.push(key);
+          collectKeys(node.children, key);
+        }
+      });
+    };
+
+    collectKeys(nodes);
+    setExpandedKeys(expandableKeys);
   };
 
   const handleCollapseAll = () => {
@@ -265,6 +323,7 @@ export default function AssemblyPreviewModal({
           <span className="preview-node-icon">
             {node.children?.length ? '📦' : '⚙️'}
           </span>
+
           <Text className="preview-design">
             {valueOrDash(value)}
           </Text>
@@ -286,6 +345,7 @@ export default function AssemblyPreviewModal({
       title: 'Тип',
       key: 'type',
       width: 115,
+      align: 'center',
       render: (_, node) => <ElementTypeTag node={node} />,
     },
     {
@@ -341,11 +401,13 @@ export default function AssemblyPreviewModal({
     selectedRow?.slZapiskaObozn ||
     'Не указано';
 
-  const productDesign =
-    selectedRow?.izdelieNumber ||
-    selectedRow?.izdelieDesign ||
-    selectedRow?.izdelieId ||
-    '—';
+  /**
+   * ВАЖНО:
+   * Номер изделия берём из корневого узла PDM.
+   * Это тот же izdelieNumber, который используется при проверке серийности.
+   * selectedRow здесь не используется: это запись таблицы служебных записок.
+   */
+  const productNumber = nodes[0]?.izdelieNumber;
 
   return (
     <Modal
@@ -355,7 +417,7 @@ export default function AssemblyPreviewModal({
       width="96vw"
       style={{ top: 18, maxWidth: 1600 }}
       destroyOnHidden={false}
-      closable
+      closable={!confirming}
       maskClosable={false}
       className="assembly-preview-modal"
       title={null}
@@ -367,15 +429,46 @@ export default function AssemblyPreviewModal({
               <TableOutlined />
             </span>
 
-            <Title level={2}>Предпросмотр структуры</Title>
+            <div>
+              <Title level={3}>
+                Предпросмотр комплектовочной ведомости
+              </Title>
 
-            <Tag color="processing" bordered={false}>
-              Перед формированием КВ
-            </Tag>
+              <Text type="secondary">
+                Проверка состава перед формированием КВ
+              </Text>
+            </div>
+
+            {selectedRow && (
+              <Tag color="processing">
+                Запись № {valueOrDash(selectedRow.number)}
+              </Tag>
+            )}
           </div>
         </div>
 
         <div className="preview-summary">
+          <div className="preview-summary-item">
+            <Text type="secondary">Служебная записка:</Text>
+            <Text strong>
+              {valueOrDash(selectedRow?.slZapiskaObozn)}
+            </Text>
+          </div>
+
+          <div className="preview-summary-item">
+            <Text type="secondary">Идентификатор СЗ:</Text>
+            <Text strong>
+              {valueOrDash(selectedRow?.slZapiskaId)}
+            </Text>
+          </div>
+
+          <div className="preview-summary-item">
+            <Text type="secondary">Спецификация:</Text>
+            <Text strong>
+              {valueOrDash(selectedRow?.specifId)}
+            </Text>
+          </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Сборка:</Text>
             <Text strong>{assemblyDesign}</Text>
@@ -383,33 +476,12 @@ export default function AssemblyPreviewModal({
 
           <div className="preview-summary-item">
             <Text type="secondary">Изделие:</Text>
-            <Tag color="blue">{productDesign}</Tag>
+            <Text strong>{valueOrDash(productNumber)}</Text>
           </div>
 
           <div className="preview-summary-item">
             <Text type="secondary">Всего элементов:</Text>
             <Text strong>{statistics.total}</Text>
-          </div>
-
-          <div className="preview-summary-item">
-            <Text type="secondary">Подходит:</Text>
-            <Text strong className="preview-count-ok">
-              {statistics.suitable}
-            </Text>
-          </div>
-
-          <div className="preview-summary-item">
-            <Text type="secondary">Не подходит:</Text>
-            <Text strong className="preview-count-error">
-              {statistics.unsuitable}
-            </Text>
-          </div>
-
-          <div className="preview-summary-item preview-loaded">
-            <CheckCircleFilled />
-            <Text>
-              Загружено ({statistics.total} элементов)
-            </Text>
           </div>
         </div>
 
@@ -433,15 +505,6 @@ export default function AssemblyPreviewModal({
             <i className="preview-legend-line" />
             Уровень вложенности
           </span>
-
-          {Object.entries(TYPE_CONFIG)
-            .filter(([key]) => ['СБ', 'ДЕТ', 'СТ', 'ПОК', 'МАТ'].includes(key))
-            .map(([key, type]) => (
-              <span className="preview-legend-item" key={key}>
-                <i className={`preview-legend-square preview-legend-${key.toLowerCase()}`} />
-                {type.label}
-              </span>
-            ))}
         </div>
 
         <div className="preview-toolbar">
@@ -450,7 +513,13 @@ export default function AssemblyPreviewModal({
               type="primary"
               icon={<ExpandAltOutlined />}
               onClick={handleExpandAll}
-              disabled={allNodes.length === 0}
+              disabled={
+                !tableData.some(
+                  (node) =>
+                    Number(node.idDivision) === 3 &&
+                    node.children?.length > 0,
+                )
+              }
             >
               Развернуть всё
             </Button>
@@ -476,7 +545,9 @@ export default function AssemblyPreviewModal({
         <div className="preview-table-wrapper">
           {loading ? (
             <div className="preview-empty">
-              <Text type="secondary">Загрузка структуры PDM...</Text>
+              <Text type="secondary">
+                Загрузка структуры PDM...
+              </Text>
             </div>
           ) : nodes.length === 0 ? (
             <Empty description="Структура не содержит элементов" />
@@ -498,12 +569,20 @@ export default function AssemblyPreviewModal({
               rowClassName={(record) => {
                 const status = getNodeStatus(record);
 
-                if (status === 'success') return 'preview-row-success';
-                if (status === 'error') return 'preview-row-error';
+                if (status === 'success') {
+                  return 'preview-row-success';
+                }
+
+                if (status === 'error') {
+                  return 'preview-row-error';
+                }
 
                 return 'preview-row-unknown';
               }}
-              scroll={{ x: 1150, y: 'calc(100vh - 440px)' }}
+              scroll={{
+                x: 1150,
+                y: 'calc(100vh - 440px)',
+              }}
               locale={{
                 emptyText: 'Нет элементов для отображения',
               }}
@@ -533,7 +612,12 @@ export default function AssemblyPreviewModal({
               icon={<CheckCircleFilled />}
               onClick={onConfirm}
               loading={confirming}
-              disabled={loading || nodes.length === 0}
+              disabled={
+                !canConfirm ||
+                loading ||
+                nodes.length === 0 ||
+                confirming
+              }
             >
               Подтвердить формирование КВ
             </Button>

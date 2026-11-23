@@ -162,6 +162,20 @@ export const kvApi = {
   },
 
   /**
+   * Получить полную структуру спецификации
+   * вместе с сериями каждой позиции.
+   *
+   * GET /api/kv/specification-structure?specifId=
+   */
+  getSpecificationStructure: async (specifId) => {
+    const response = await apiClient.get('/kv/specification-structure', {
+      params: { specifId },
+    });
+
+    return response.data;
+  },
+
+  /**
    * Сформировать комплектовку.
    *
    * POST /api/kv/form

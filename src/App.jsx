@@ -7,6 +7,8 @@ import {
   Empty,
   Input,
   Modal,
+  Select,
+  Space,
   Spin,
   Table,
   Tag,
@@ -23,9 +25,13 @@ import {
   FolderOutlined,
   ReloadOutlined,
   SearchOutlined,
+  StopOutlined,
+  UndoOutlined,
 } from '@ant-design/icons';
 
 import { treeApi, kvApi } from './api/client';
+import SpecificationStructureModal from './components/SpecificationStructureModal';
+import './styles/table-panel.css';
 
 const { Text, Title } = Typography;
 
@@ -282,6 +288,11 @@ export default function App() {
   const [tableLoading, setTableLoading] = useState(false);
   const [selectedRow, setSelectedRow] = useState(null);
 
+  // Локальный поиск и фильтры центральной таблицы.
+  const [tableSearch, setTableSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('ALL');
+  const [kvFilter, setKvFilter] = useState('ALL');
+
   const [assemblyData, setAssemblyData] = useState([]);
   const [assemblyLoading, setAssemblyLoading] = useState(false);
   const [assemblySpecifId, setAssemblySpecifId] = useState(null);
@@ -290,6 +301,9 @@ export default function App() {
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
+
+  // Новая модалка полной структуры спецификации.
+  const [specificationOpen, setSpecificationOpen] = useState(false);
 
   const [globalError, setGlobalError] = useState(null);
 
@@ -302,31 +316,28 @@ export default function App() {
     ? `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`
     : null;
 
-  const loadTree = useCallback(async () => {
-    setTreeLoading(true);
-    setGlobalError(null);
+const loadTree = useCallback(async () => {
+  setTreeLoading(true);
+  setGlobalError(null);
 
-    try {
-      const response = await treeApi.getFullTree();
-      const temas = response?.temas || [];
+  try {
+    const response = await treeApi.getFullTree();
+    const temas = response?.temas || [];
 
-      setTreeData(temas);
+    setTreeData(temas);
 
-      if (temas.length > 0) {
-        setExpandedKeys((current) =>
-          current.length > 0 ? current : [`tema-${temas[0].id}`],
-        );
-      }
-    } catch (error) {
-      const errorMessage =
-        error?.message || 'Не удалось загрузить дерево изделий';
+    // При загрузке и обновлении все узлы дерева закрыты.
+    setExpandedKeys([]);
+  } catch (error) {
+    const errorMessage =
+      error?.message || 'Не удалось загрузить дерево изделий';
 
-      setGlobalError(errorMessage);
-      messageApi.error(errorMessage);
-    } finally {
-      setTreeLoading(false);
-    }
-  }, [messageApi]);
+    setGlobalError(errorMessage);
+    messageApi.error(errorMessage);
+  } finally {
+    setTreeLoading(false);
+  }
+}, [messageApi]);
 
   const loadTable = useCallback(
     async (group, options = {}) => {
@@ -336,6 +347,9 @@ export default function App() {
       setTableData([]);
       setGroupInfo(null);
       setSelectedRow(null);
+      setTableSearch('');
+      setStatusFilter('ALL');
+      setKvFilter('ALL');
       setAssemblyData([]);
       setAssemblySpecifId(null);
       setAssemblyLoadingSpecifId(null);
@@ -481,7 +495,6 @@ export default function App() {
       return;
     }
 
-    // При двойном щелчке можно передать строку напрямую.
     if (targetRow !== selectedRow) {
       setSelectedRow(targetRow);
     }
@@ -495,6 +508,27 @@ export default function App() {
     ) {
       await loadAssemblyPreview(targetRow);
     }
+  };
+
+  // Открытие отдельной модалки полной структуры спецификации.
+  const handleOpenSpecification = () => {
+    if (!selectedRow) {
+      messageApi.warning('Сначала выбери запись в таблице');
+      return;
+    }
+
+    if (!selectedRow.specifId) {
+      messageApi.warning(
+        'Для выбранной записи отсутствует идентификатор спецификации',
+      );
+      return;
+    }
+
+    setSpecificationOpen(true);
+  };
+
+  const handleCloseSpecification = () => {
+    setSpecificationOpen(false);
   };
 
   const handleClosePreview = () => {
@@ -542,6 +576,66 @@ export default function App() {
     } finally {
       setFormLoading(false);
     }
+  };
+
+  // Статусы формируются из фактических значений ответа API.
+  const statusOptions = useMemo(() => {
+    const statuses = [
+      ...new Set(
+        tableData
+          .map((row) => row.status)
+          .filter((status) => status !== null && status !== undefined && status !== ''),
+      ),
+    ];
+
+    return [
+      { value: 'ALL', label: 'Все статусы' },
+      ...statuses.map((status) => ({
+        value: String(status),
+        label: getStatusLabel(status),
+      })),
+    ];
+  }, [tableData]);
+
+  const filteredTableData = useMemo(() => {
+    const normalizedSearch = tableSearch.trim().toLocaleLowerCase('ru-RU');
+
+    return tableData.filter((row) => {
+      const searchableValues = [
+        row.number,
+        row.slZapiskaId,
+        row.slZapiskaObozn,
+        row.komplektovkaId,
+        row.komplektovkaDesign,
+        row.parentKvDesign,
+        row.specifId,
+      ];
+
+      const matchesSearch =
+        !normalizedSearch ||
+        searchableValues.some((value) =>
+          String(value ?? '')
+            .toLocaleLowerCase('ru-RU')
+            .includes(normalizedSearch),
+        );
+
+      const matchesStatus =
+        statusFilter === 'ALL' || String(row.status) === statusFilter;
+
+      const hasKv = Boolean(row.hasKv || row.komplektovkaId);
+      const matchesKv =
+        kvFilter === 'ALL' ||
+        (kvFilter === 'HAS_KV' && hasKv) ||
+        (kvFilter === 'NO_KV' && !hasKv);
+
+      return matchesSearch && matchesStatus && matchesKv;
+    });
+  }, [tableData, tableSearch, statusFilter, kvFilter]);
+
+  const resetTableFilters = () => {
+    setTableSearch('');
+    setStatusFilter('ALL');
+    setKvFilter('ALL');
   };
 
   const columns = [
@@ -764,13 +858,21 @@ export default function App() {
 
         {/* ПАНЕЛЬ 2. ТАБЛИЦА */}
         <section className="panel table-panel">
-          <div className="panel-header">
-            <div>
+          <div className="panel-header table-panel-header">
+            <div className="table-panel-heading">
               <Title level={5}>Комплектовки и служебные записки</Title>
               <Text type="secondary">{selectedGroupTitle}</Text>
             </div>
 
             <div className="panel-header-actions">
+              <Button
+                icon={<FileSearchOutlined />}
+                disabled={!selectedRow || !selectedRow.specifId}
+                onClick={handleOpenSpecification}
+              >
+                Просмотреть спецификацию
+              </Button>
+
               <Button
                 icon={<FileSearchOutlined />}
                 type="primary"
@@ -779,6 +881,88 @@ export default function App() {
               >
                 Предпросмотр
               </Button>
+            </div>
+          </div>
+
+          {/* ПОИСК И ФИЛЬТРЫ — отдельные строки, не в шапке панели */}
+          <div className="table-filter-toolbar">
+            <Input
+              className="table-search-input"
+              allowClear
+              prefix={<SearchOutlined />}
+              placeholder="Поиск по №, СЗ, КВ, спецификации..."
+              value={tableSearch}
+              onChange={(event) => setTableSearch(event.target.value)}
+              disabled={!selectedGroup || tableLoading}
+            />
+
+            <div className="table-filter-controls">
+              <Select
+                className="table-filter-select"
+                value={statusFilter}
+                onChange={setStatusFilter}
+                disabled={!selectedGroup || tableLoading}
+                options={statusOptions}
+              />
+
+              <Select
+                className="table-filter-select table-kv-filter"
+                value={kvFilter}
+                onChange={setKvFilter}
+                disabled={!selectedGroup || tableLoading}
+                options={[
+                  { value: 'ALL', label: 'Все записи' },
+                  { value: 'HAS_KV', label: 'С комплектовкой' },
+                  { value: 'NO_KV', label: 'Без комплектовки' },
+                ]}
+              />
+
+              <Button
+                className="table-reset-button"
+                onClick={resetTableFilters}
+                disabled={
+                  !tableSearch &&
+                  statusFilter === 'ALL' &&
+                  kvFilter === 'ALL'
+                }
+              >
+                Сбросить
+              </Button>
+            </div>
+          </div>
+
+          {/* ДЕЙСТВИЯ НАД ВЫБРАННОЙ ЗАПИСЬЮ — отдельная строка */}
+          <div className="table-action-toolbar">
+            <div className="table-secondary-actions">
+              <Button
+                className="table-danger-action"
+                danger
+                icon={<StopOutlined />}
+                disabled
+                title="Backend-операция пока не подключена"
+              >
+                Аннулировать КВ
+              </Button>
+
+              <Button
+                className="table-neutral-action"
+                icon={<UndoOutlined />}
+                disabled
+                title="Backend-операция пока не подключена"
+              >
+                Отменить декомпозицию
+              </Button>
+            </div>
+
+            <div className="table-selected-label">
+              {selectedRow ? (
+                <>
+                  <span className="table-selected-dot" />
+                  Выбрана запись № {valueOrDash(selectedRow.number)}
+                </>
+              ) : (
+                'Запись не выбрана'
+              )}
             </div>
           </div>
 
@@ -792,7 +976,7 @@ export default function App() {
               <Table
                 rowKey={getTableRowKey}
                 columns={columns}
-                dataSource={tableData}
+                dataSource={filteredTableData}
                 loading={tableLoading}
                 size="small"
                 bordered
@@ -822,7 +1006,9 @@ export default function App() {
           </div>
 
           <div className="panel-footer table-footer">
-            <Text type="secondary">Записей: {tableData.length}</Text>
+            <Text type="secondary">
+              Показано: {filteredTableData.length} из {tableData.length}
+            </Text>
 
             {selectedRow && (
               <Text type="secondary">
@@ -904,6 +1090,13 @@ export default function App() {
         </div>
         <Tag>Не реализовано</Tag>
       </footer>
+
+      {/* НОВАЯ МОДАЛКА ПОЛНОЙ СТРУКТУРЫ СПЕЦИФИКАЦИИ */}
+      <SpecificationStructureModal
+        open={specificationOpen}
+        onClose={handleCloseSpecification}
+        specifId={selectedRow?.specifId}
+      />
 
       {/* МОДАЛЬНОЕ ОКНО ПРЕДПРОСМОТРА И ФОРМИРОВАНИЯ */}
       <Modal
