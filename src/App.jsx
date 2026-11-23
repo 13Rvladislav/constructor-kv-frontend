@@ -51,6 +51,8 @@ const STATUS_LABELS = {
   REJECTED: 'Отклонена',
 };
 
+const PAGE_SIZE_OPTIONS = ['10', '20', '50', '100'];
+
 const valueOrDash = (value) =>
   value === null || value === undefined || value === '' ? '—' : value;
 
@@ -267,19 +269,8 @@ function AssemblyNode({ node }) {
   );
 }
 
-function normalizeStatusOptions(serverOptions, rows) {
-  const source =
-    Array.isArray(serverOptions) && serverOptions.length > 0
-      ? serverOptions
-      : rows
-          .map((row) => row.status)
-          .filter(
-            (status) =>
-              status !== null &&
-              status !== undefined &&
-              status !== '',
-          );
-
+function normalizeStatusOptions(serverOptions) {
+  const source = Array.isArray(serverOptions) ? serverOptions : [];
   const unique = new Map();
 
   source.forEach((item) => {
@@ -325,8 +316,13 @@ export default function App() {
   const [serverStatusOptions, setServerStatusOptions] = useState([]);
 
   const [tableSearch, setTableSearch] = useState('');
+  const [debouncedTableSearch, setDebouncedTableSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [kvFilter, setKvFilter] = useState('ALL');
+
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(20);
+  const [totalRows, setTotalRows] = useState(0);
 
   const [assemblyData, setAssemblyData] = useState([]);
   const [assemblyLoading, setAssemblyLoading] = useState(false);
@@ -334,6 +330,7 @@ export default function App() {
   const [assemblyLoadingSpecifId, setAssemblyLoadingSpecifId] = useState(null);
 
   const assemblyRequestRef = useRef(0);
+  const tableRequestRef = useRef(0);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [formLoading, setFormLoading] = useState(false);
@@ -346,9 +343,45 @@ export default function App() {
     [treeData, treeSearch],
   );
 
+  const statusOptions = useMemo(
+    () => normalizeStatusOptions(serverStatusOptions),
+    [serverStatusOptions],
+  );
+
   const selectedTreeKey = selectedGroup
     ? `group-${selectedGroup.temaId}-${selectedGroup.izdelieId}-${selectedGroup.groupeId}`
     : null;
+
+  const selectedGroupTitle = groupInfo
+    ? [
+        groupInfo.temaName || selectedGroup?.temaName,
+        groupInfo.izdelieName || selectedGroup?.izdelieName,
+        groupInfo.groupeId
+          ? `Группа ${groupInfo.groupeId}`
+          : selectedGroup?.groupeName,
+      ]
+          .filter(Boolean)
+          .join(' / ')
+    : selectedGroup
+      ? [
+          selectedGroup.temaName,
+          selectedGroup.izdelieName,
+          selectedGroup.groupeName ||
+            `Группа ${selectedGroup.groupeId}`,
+        ]
+          .filter(Boolean)
+          .join(' / ')
+      : 'Группа не выбрана';
+
+  const clearSelectedRow = useCallback(() => {
+    setSelectedRow(null);
+
+    assemblyRequestRef.current += 1;
+    setAssemblyData([]);
+    setAssemblySpecifId(null);
+    setAssemblyLoadingSpecifId(null);
+    setAssemblyLoading(false);
+  }, []);
 
   const loadTree = useCallback(async () => {
     setTreeLoading(true);
@@ -371,29 +404,35 @@ export default function App() {
     }
   }, [messageApi]);
 
+  /**
+   * Загрузка таблицы.
+   *
+   * Все фильтры и параметры пагинации передаются на backend.
+   * Здесь больше нет локальной фильтрации полученных строк.
+   */
   const loadTable = useCallback(
-    async (group, options = {}) => {
+    async (group, query, options = {}) => {
       if (!group) return;
 
+      const requestId = ++tableRequestRef.current;
+
       setTableLoading(true);
-      setTableData([]);
-      setGroupInfo(null);
-      setServerStatusOptions([]);
-      setSelectedRow(null);
-
-      setTableSearch('');
-      setStatusFilter('ALL');
-      setKvFilter('ALL');
-
-      setAssemblyData([]);
-      setAssemblySpecifId(null);
-      setAssemblyLoadingSpecifId(null);
-
-      assemblyRequestRef.current += 1;
-      setAssemblyLoading(false);
 
       try {
-        const response = await kvApi.getTable(group);
+        const response = await kvApi.getTable({
+          temaId: group.temaId,
+          izdelieId: group.izdelieId,
+          groupeId: group.groupeId,
+          search: query.search,
+          status: query.status,
+          hasKv: query.hasKv,
+          page: query.page,
+          size: query.size,
+        });
+
+        if (requestId !== tableRequestRef.current) {
+          return;
+        }
 
         const rows = Array.isArray(response?.rows)
           ? response.rows
@@ -401,6 +440,7 @@ export default function App() {
 
         setTableData(rows);
         setGroupInfo(response?.groupInfo || null);
+        setTotalRows(Number(response?.totalRows ?? rows.length));
 
         setServerStatusOptions(
           Array.isArray(response?.statusOptions)
@@ -408,27 +448,82 @@ export default function App() {
             : [],
         );
 
-        if (options.keepSelection && options.selectedSlZapiskaId) {
+        if (options.keepSelection && options.selectedRow) {
           const refreshedRow = rows.find(
             (row) =>
               String(row.slZapiskaId) ===
-              String(options.selectedSlZapiskaId),
+                String(options.selectedRow.slZapiskaId) &&
+              String(row.specifId) ===
+                String(options.selectedRow.specifId),
           );
 
           if (refreshedRow) {
             setSelectedRow(refreshedRow);
+          } else {
+            clearSelectedRow();
           }
         }
       } catch (error) {
-        messageApi.error(
-          error?.message || 'Не удалось загрузить таблицу комплектовок',
-        );
+        if (requestId === tableRequestRef.current) {
+          messageApi.error(
+            error?.message || 'Не удалось загрузить таблицу комплектовок',
+          );
+        }
       } finally {
-        setTableLoading(false);
+        if (requestId === tableRequestRef.current) {
+          setTableLoading(false);
+        }
       }
     },
-    [messageApi],
+    [clearSelectedRow, messageApi],
   );
+
+  /**
+   * Задержка поиска, чтобы не отправлять запрос на каждый символ.
+   */
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      setDebouncedTableSearch(tableSearch.trim());
+    }, 350);
+
+    return () => clearTimeout(timeoutId);
+  }, [tableSearch]);
+
+  /**
+   * Автоматическая загрузка таблицы при изменении:
+   * - выбранной группы;
+   * - поисковой строки;
+   * - статуса;
+   * - наличия КВ;
+   * - страницы;
+   * - размера страницы.
+   */
+  useEffect(() => {
+    if (!selectedGroup) return;
+
+    const query = {
+      search: debouncedTableSearch,
+      status: statusFilter,
+      hasKv:
+        kvFilter === 'HAS_KV'
+          ? true
+          : kvFilter === 'NO_KV'
+            ? false
+            : undefined,
+      page,
+      size: pageSize,
+    };
+
+    loadTable(selectedGroup, query);
+  }, [
+    selectedGroup,
+    debouncedTableSearch,
+    statusFilter,
+    kvFilter,
+    page,
+    pageSize,
+    loadTable,
+  ]);
 
   const loadAssemblyPreview = useCallback(
     async (row) => {
@@ -497,21 +592,30 @@ export default function App() {
       return;
     }
 
-    setSelectedGroup(node.data);
-    loadTable(node.data);
+    const nextGroup = node.data;
+
+    setSelectedGroup(nextGroup);
+
+    setTableSearch('');
+    setDebouncedTableSearch('');
+    setStatusFilter('ALL');
+    setKvFilter('ALL');
+    setPage(0);
+    setPageSize(20);
+
+    setTableData([]);
+    setGroupInfo(null);
+    setTotalRows(0);
+    setServerStatusOptions([]);
+
+    clearSelectedRow();
   };
 
   const handleRowSelect = (record) => {
     setSelectedRow(record || null);
 
     if (!record) {
-      assemblyRequestRef.current += 1;
-
-      setAssemblyData([]);
-      setAssemblySpecifId(null);
-      setAssemblyLoadingSpecifId(null);
-      setAssemblyLoading(false);
-
+      clearSelectedRow();
       return;
     }
 
@@ -522,12 +626,7 @@ export default function App() {
     ) {
       loadAssemblyPreview(record);
     } else if (!record.specifId) {
-      assemblyRequestRef.current += 1;
-
-      setAssemblyData([]);
-      setAssemblySpecifId(null);
-      setAssemblyLoadingSpecifId(null);
-      setAssemblyLoading(false);
+      clearSelectedRow();
 
       messageApi.warning(
         'Для выбранной записи отсутствует идентификатор спецификации',
@@ -614,10 +713,27 @@ export default function App() {
       messageApi.success('Комплектовочная ведомость сформирована');
       setPreviewOpen(false);
 
-      await loadTable(selectedGroup, {
-        keepSelection: true,
-        selectedSlZapiskaId: selectedRow.slZapiskaId,
-      });
+      const currentSelectedRow = selectedRow;
+
+      await loadTable(
+        selectedGroup,
+        {
+          search: debouncedTableSearch,
+          status: statusFilter,
+          hasKv:
+            kvFilter === 'HAS_KV'
+              ? true
+              : kvFilter === 'NO_KV'
+                ? false
+                : undefined,
+          page,
+          size: pageSize,
+        },
+        {
+          keepSelection: true,
+          selectedRow: currentSelectedRow,
+        },
+      );
     } catch (error) {
       messageApi.error(
         error?.message || 'Не удалось сформировать комплектовочную ведомость',
@@ -627,54 +743,44 @@ export default function App() {
     }
   };
 
-  const statusOptions = useMemo(
-    () => normalizeStatusOptions(serverStatusOptions, tableData),
-    [serverStatusOptions, tableData],
-  );
-
-  const filteredTableData = useMemo(() => {
-    const normalizedSearch = tableSearch
-      .trim()
-      .toLocaleLowerCase('ru-RU');
-
-    return tableData.filter((row) => {
-      const searchableValues = [
-        row.number,
-        row.slZapiskaId,
-        row.slZapiskaObozn,
-        row.komplektovkaId,
-        row.komplektovkaDesign,
-        row.parentKvDesign,
-        row.specifId,
-      ];
-
-      const matchesSearch =
-        !normalizedSearch ||
-        searchableValues.some((value) =>
-          String(value ?? '')
-            .toLocaleLowerCase('ru-RU')
-            .includes(normalizedSearch),
-        );
-
-      const matchesStatus =
-        statusFilter === 'ALL' ||
-        String(row.status) === statusFilter;
-
-      const hasKv = Boolean(row.hasKv || row.komplektovkaId);
-
-      const matchesKv =
-        kvFilter === 'ALL' ||
-        (kvFilter === 'HAS_KV' && hasKv) ||
-        (kvFilter === 'NO_KV' && !hasKv);
-
-      return matchesSearch && matchesStatus && matchesKv;
-    });
-  }, [tableData, tableSearch, statusFilter, kvFilter]);
-
   const resetTableFilters = () => {
     setTableSearch('');
+    setDebouncedTableSearch('');
     setStatusFilter('ALL');
     setKvFilter('ALL');
+    setPage(0);
+
+    clearSelectedRow();
+  };
+
+  const handleTableSearchChange = (event) => {
+    setTableSearch(event.target.value);
+    setPage(0);
+    clearSelectedRow();
+  };
+
+  const handleStatusChange = (value) => {
+    setStatusFilter(value);
+    setPage(0);
+    clearSelectedRow();
+  };
+
+  const handleKvFilterChange = (value) => {
+    setKvFilter(value);
+    setPage(0);
+    clearSelectedRow();
+  };
+
+  const handleTablePaginationChange = (nextPage, nextPageSize) => {
+    clearSelectedRow();
+
+    if (nextPageSize !== pageSize) {
+      setPageSize(nextPageSize);
+      setPage(0);
+      return;
+    }
+
+    setPage(nextPage - 1);
   };
 
   const columns = [
@@ -760,29 +866,8 @@ export default function App() {
     },
   ];
 
-  const selectedGroupTitle = groupInfo
-    ? [
-        groupInfo.temaName || selectedGroup?.temaName,
-        groupInfo.izdelieName || selectedGroup?.izdelieName,
-        groupInfo.groupeId
-          ? `Группа ${groupInfo.groupeId}`
-          : selectedGroup?.groupeName,
-      ]
-          .filter(Boolean)
-          .join(' / ')
-    : selectedGroup
-      ? [
-          selectedGroup.temaName,
-          selectedGroup.izdelieName,
-          selectedGroup.groupeName ||
-            `Группа ${selectedGroup.groupeId}`,
-        ]
-          .filter(Boolean)
-          .join(' / ')
-      : 'Группа не выбрана';
-
   const selectedRowIndex = selectedRow
-    ? filteredTableData.findIndex(
+    ? tableData.findIndex(
         (row) =>
           String(row.slZapiskaId) === String(selectedRow.slZapiskaId) &&
           String(row.specifId) === String(selectedRow.specifId) &&
@@ -943,7 +1028,7 @@ export default function App() {
               prefix={<SearchOutlined />}
               placeholder="Поиск по №, СЗ, КВ, спецификации..."
               value={tableSearch}
-              onChange={(event) => setTableSearch(event.target.value)}
+              onChange={handleTableSearchChange}
               disabled={!selectedGroup || tableLoading}
             />
 
@@ -951,7 +1036,7 @@ export default function App() {
               <Select
                 className="table-filter-select"
                 value={statusFilter}
-                onChange={setStatusFilter}
+                onChange={handleStatusChange}
                 disabled={!selectedGroup || tableLoading}
                 options={statusOptions}
                 placeholder="Все статусы"
@@ -961,7 +1046,7 @@ export default function App() {
               <Select
                 className="table-filter-select table-kv-filter"
                 value={kvFilter}
-                onChange={setKvFilter}
+                onChange={handleKvFilterChange}
                 disabled={!selectedGroup || tableLoading}
                 options={[
                   { value: 'ALL', label: 'Все записи' },
@@ -1029,15 +1114,19 @@ export default function App() {
               <Table
                 rowKey={getTableRowKey}
                 columns={columns}
-                dataSource={filteredTableData}
+                dataSource={tableData}
                 loading={tableLoading}
                 size="small"
                 bordered
                 pagination={{
-                  pageSize: 20,
+                  current: page + 1,
+                  pageSize,
+                  total: totalRows,
                   showSizeChanger: true,
-                  pageSizeOptions: ['10', '20', '50', '100'],
-                  showTotal: (total) => `Всего записей: ${total}`,
+                  pageSizeOptions: PAGE_SIZE_OPTIONS,
+                  showTotal: (total, range) =>
+                    `${range[0]}–${range[1]} из ${total}`,
+                  onChange: handleTablePaginationChange,
                 }}
                 scroll={{ x: 1100 }}
                 rowSelection={{
@@ -1060,7 +1149,7 @@ export default function App() {
 
           <div className="panel-footer table-footer">
             <Text type="secondary">
-              Показано: {filteredTableData.length} из {tableData.length}
+              На странице: {tableData.length}. Всего: {totalRows}
             </Text>
 
             {selectedRow && (
