@@ -23,11 +23,17 @@ import {
   SearchOutlined,
   StopOutlined,
   UndoOutlined,
+  LeftOutlined,
+  RightOutlined,
+  ExpandOutlined,
+  CompressOutlined,
 } from '@ant-design/icons';
 
 import { treeApi, kvApi } from './api/client';
 import AssemblyPreviewModal from './components/AssemblyPreviewModal';
 import SpecificationStructureModal from './components/SpecificationStructureModal';
+import AssemblyStructureTable from './components/AssemblyStructureTable';
+import './styles/panel-collapse.css';
 
 const { Text, Title } = Typography;
 
@@ -184,91 +190,6 @@ function countAssemblyNodes(nodes = []) {
   );
 }
 
-function AssemblyNode({ node }) {
-  const children = node.children || [];
-
-  return (
-    <div className="assembly-node">
-      <div className="assembly-node-main">
-        <div className="assembly-node-info">
-          <Text className="assembly-node-design">
-            {valueOrDash(node.obozn)}
-          </Text>
-
-          <Text className="assembly-node-name">
-            {valueOrDash(node.naim)}
-          </Text>
-        </div>
-
-        <div className="assembly-node-meta">
-          <Text type="secondary">
-            Кол-во: {valueOrDash(node.quantity)}
-          </Text>
-
-          {node.massa !== null && node.massa !== undefined && (
-            <Text type="secondary">
-              Масса: {node.massa}
-            </Text>
-          )}
-
-          {node.level !== null && node.level !== undefined && (
-            <Tag bordered={false}>Уровень {node.level}</Tag>
-          )}
-        </div>
-      </div>
-
-      {(node.material || node.note) && (
-        <div className="assembly-node-extra">
-          {node.material && (
-            <Text type="secondary">Материал: {node.material}</Text>
-          )}
-
-          {node.note && (
-            <Text type="secondary">Примечание: {node.note}</Text>
-          )}
-        </div>
-      )}
-
-      {node.fitsSeries !== null && node.fitsSeries !== undefined && (
-        <div className="assembly-node-extra">
-          <Tag color={node.fitsSeries ? 'success' : 'warning'}>
-            {node.fitsSeries
-              ? 'Соответствует серии'
-              : 'Не соответствует серии'}
-          </Tag>
-
-          {node.fitReason && (
-            <Text type="secondary">{node.fitReason}</Text>
-          )}
-        </div>
-      )}
-
-      {node.series?.length > 0 && (
-        <div className="assembly-series">
-          <Text type="secondary">Серии:</Text>
-
-          {node.series.map((series, index) => (
-            <Tag key={`${node.id}-series-${index}`}>
-              {valueOrDash(series.mini)} – {valueOrDash(series.maxi)}
-            </Tag>
-          ))}
-        </div>
-      )}
-
-      {children.length > 0 && (
-        <div className="assembly-node-children">
-          {children.map((child, index) => (
-            <AssemblyNode
-              key={child.id ?? `${node.id}-${index}`}
-              node={child}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function normalizeStatusOptions(serverOptions) {
   const source = Array.isArray(serverOptions) ? serverOptions : [];
   const unique = new Map();
@@ -338,6 +259,26 @@ export default function App() {
   const [specificationOpen, setSpecificationOpen] = useState(false);
   const [globalError, setGlobalError] = useState(null);
 
+  // Управление шириной рабочих панелей.
+  const [collapsedPanels, setCollapsedPanels] = useState({
+    tree: false,
+    table: false,
+  });
+  const [assemblyFocus, setAssemblyFocus] = useState(false);
+
+  const togglePanel = (panel) => {
+    setCollapsedPanels((previous) => ({
+      ...previous,
+      [panel]: !previous[panel],
+    }));
+    setAssemblyFocus(false);
+  };
+
+  const toggleAssemblyFocus = () => {
+    setAssemblyFocus((previous) => !previous);
+    setCollapsedPanels({ tree: false, table: false });
+  };
+
   const filteredTree = useMemo(
     () => getTreeData(treeData, treeSearch),
     [treeData, treeSearch],
@@ -354,23 +295,23 @@ export default function App() {
 
   const selectedGroupTitle = groupInfo
     ? [
-        groupInfo.temaName || selectedGroup?.temaName,
-        groupInfo.izdelieName || selectedGroup?.izdelieName,
-        groupInfo.groupeId
-          ? `Группа ${groupInfo.groupeId}`
-          : selectedGroup?.groupeName,
-      ]
-          .filter(Boolean)
-          .join(' / ')
+      groupInfo.temaName || selectedGroup?.temaName,
+      groupInfo.izdelieName || selectedGroup?.izdelieName,
+      groupInfo.groupeId
+        ? `Группа ${groupInfo.groupeId}`
+        : selectedGroup?.groupeName,
+    ]
+      .filter(Boolean)
+      .join(' / ')
     : selectedGroup
       ? [
-          selectedGroup.temaName,
-          selectedGroup.izdelieName,
-          selectedGroup.groupeName ||
-            `Группа ${selectedGroup.groupeId}`,
-        ]
-          .filter(Boolean)
-          .join(' / ')
+        selectedGroup.temaName,
+        selectedGroup.izdelieName,
+        selectedGroup.groupeName ||
+        `Группа ${selectedGroup.groupeId}`,
+      ]
+        .filter(Boolean)
+        .join(' / ')
       : 'Группа не выбрана';
 
   const clearSelectedRow = useCallback(() => {
@@ -452,9 +393,9 @@ export default function App() {
           const refreshedRow = rows.find(
             (row) =>
               String(row.slZapiskaId) ===
-                String(options.selectedRow.slZapiskaId) &&
+              String(options.selectedRow.slZapiskaId) &&
               String(row.specifId) ===
-                String(options.selectedRow.specifId),
+              String(options.selectedRow.specifId),
           );
 
           if (refreshedRow) {
@@ -783,96 +724,58 @@ export default function App() {
     setPage(nextPage - 1);
   };
 
-  const columns = [
-    {
-      title: '№',
-      dataIndex: 'number',
-      key: 'number',
-      width: 55,
-      align: 'center',
-    },
-    {
-      title: 'Служебная записка',
-      dataIndex: 'slZapiskaObozn',
-      key: 'slZapiskaObozn',
-      width: 180,
-      ellipsis: true,
-      render: valueOrDash,
-    },
-    {
-      title: 'Обозначение КВ',
-      dataIndex: 'komplektovkaDesign',
-      key: 'komplektovkaDesign',
-      width: 180,
-      ellipsis: true,
-      render: (value) =>
-        value ? (
-          <Text strong>{value}</Text>
-        ) : (
-          <Text type="secondary">Не сформирована</Text>
-        ),
-    },
-    {
-      title: 'Родительская КВ',
-      dataIndex: 'parentKvDesign',
-      key: 'parentKvDesign',
-      width: 160,
-      ellipsis: true,
-      render: valueOrDash,
-    },
-    {
-      title: 'Дата согласования',
-      dataIndex: 'slZapAgreedDate',
-      key: 'slZapAgreedDate',
-      width: 145,
-      render: formatDate,
-    },
-    {
-      title: 'Статус',
-      dataIndex: 'status',
-      key: 'status',
-      width: 130,
-      render: (status) => (
-        <Tag color={getStatusColor(status)}>
-          {getStatusLabel(status)}
-        </Tag>
+  
+const columns = [
+   {
+    title: 'Служебная записка',
+    dataIndex: 'slZapiskaObozn',
+    key: 'slZapiskaObozn',
+    width: 115,
+    ellipsis: true,
+    render: valueOrDash,
+  },
+  {
+    title: 'Обозначение КВ',
+    dataIndex: 'komplektovkaDesign',
+    key: 'komplektovkaDesign',
+    width: 135,
+    ellipsis: true,
+    render: (value) =>
+      value ? (
+        <Text strong>{value}</Text>
+      ) : (
+        <Text type="secondary">Не сформирована</Text>
       ),
-    },
-    {
-      title: 'Согласование СЗ',
-      dataIndex: 'isSlZapAgreed',
-      key: 'isSlZapAgreed',
-      width: 135,
-      align: 'center',
-      render: (value) =>
-        value ? (
-          <Tag color="success">Да</Tag>
-        ) : (
-          <Tag>Нет</Tag>
-        ),
-    },
-    {
-      title: 'КВ',
-      dataIndex: 'hasKv',
-      key: 'hasKv',
-      width: 75,
-      align: 'center',
-      render: (value, record) =>
-        value || record.komplektovkaId ? (
-          <Tag color="success">Есть</Tag>
-        ) : (
-          <Tag>Нет</Tag>
-        ),
-    },
-  ];
+  },
+  {
+    title: 'Дата',
+    dataIndex: 'slZapAgreedDate',
+    key: 'slZapAgreedDate',
+    width: 82,
+    ellipsis: true,
+    render: formatDate,
+  },
+  {
+    title: 'Статус',
+    dataIndex: 'status',
+    key: 'status',
+    width: 85,
+    render: (status) => (
+      <Tag color={getStatusColor(status)}>
+        {getStatusLabel(status)}
+      </Tag>
+    ),
+  },
+];
+
 
   const selectedRowIndex = selectedRow
     ? tableData.findIndex(
-        (row) =>
-          String(row.slZapiskaId) === String(selectedRow.slZapiskaId) &&
-          String(row.specifId) === String(selectedRow.specifId) &&
-          String(row.number) === String(selectedRow.number),
-      )
+      (row) =>
+        String(row.slZapiskaId) === String(selectedRow.slZapiskaId) &&
+        String(row.specifId) === String(selectedRow.specifId) &&
+        String(row.number) === String(selectedRow.number),
+    )
     : -1;
 
   const selectedRowKey =
@@ -882,10 +785,10 @@ export default function App() {
 
   const canFormKv = Boolean(
     selectedRow &&
-      !selectedRow.hasKv &&
-      !selectedRow.komplektovkaId &&
-      selectedRow.slZapiskaId &&
-      selectedRow.specifId,
+    !selectedRow.hasKv &&
+    !selectedRow.komplektovkaId &&
+    selectedRow.slZapiskaId &&
+    selectedRow.specifId,
   );
 
   const assemblyCount = countAssemblyNodes(assemblyData);
@@ -936,13 +839,30 @@ export default function App() {
         />
       )}
 
-      <main className="workspace">
+      <main
+        className={[
+          'workspace',
+          collapsedPanels.tree ? 'tree-panel-collapsed' : '',
+          collapsedPanels.table ? 'table-panel-collapsed' : '',
+          assemblyFocus ? 'assembly-focus-mode' : '',
+        ].filter(Boolean).join(' ')}
+      >
         <section className="panel tree-panel">
           <div className="panel-header">
             <div>
               <Title level={5}>Структура изделий</Title>
               <Text type="secondary">Темы, изделия и группы</Text>
             </div>
+
+            <Button
+              className="panel-collapse-button"
+              type="text"
+              size="small"
+              title={collapsedPanels.tree ? 'Развернуть панель' : 'Свернуть панель'}
+              aria-label={collapsedPanels.tree ? 'Развернуть панель структуры' : 'Свернуть панель структуры'}
+              icon={collapsedPanels.tree ? <RightOutlined /> : <LeftOutlined />}
+              onClick={() => togglePanel('tree')}
+            />
           </div>
 
           <div className="panel-search">
@@ -1018,6 +938,16 @@ export default function App() {
               >
                 Предпросмотр
               </Button>
+
+              <Button
+                className="panel-collapse-button"
+                type="text"
+                size="small"
+                title={collapsedPanels.table ? 'Развернуть панель' : 'Свернуть панель'}
+                aria-label={collapsedPanels.table ? 'Развернуть панель комплектовок' : 'Свернуть панель комплектовок'}
+                icon={collapsedPanels.table ? <LeftOutlined /> : <RightOutlined />}
+                onClick={() => togglePanel('table')}
+              />
             </div>
           </div>
 
@@ -1128,7 +1058,7 @@ export default function App() {
                     `${range[0]}–${range[1]} из ${total}`,
                   onChange: handleTablePaginationChange,
                 }}
-                scroll={{ x: 1100 }}
+               tableLayout="fixed"
                 rowSelection={{
                   type: 'radio',
                   selectedRowKeys: selectedRowKey ? [selectedRowKey] : [],
@@ -1167,13 +1097,24 @@ export default function App() {
               <Text type="secondary">Исходная структура PDM</Text>
             </div>
 
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              disabled={!selectedRow}
-              loading={assemblyLoading}
-              onClick={() => loadAssemblyPreview(selectedRow)}
-            />
+            <div className="panel-header-actions">
+              <Button
+                type="text"
+                size="small"
+                title={assemblyFocus ? 'Вернуть обычный режим' : 'Развернуть состав на всю ширину'}
+                aria-label={assemblyFocus ? 'Вернуть обычный режим панелей' : 'Развернуть состав на всю ширину'}
+                icon={assemblyFocus ? <CompressOutlined /> : <ExpandOutlined />}
+                onClick={toggleAssemblyFocus}
+              />
+
+              <Button
+                size="small"
+                icon={<ReloadOutlined />}
+                disabled={!selectedRow}
+                loading={assemblyLoading}
+                onClick={() => loadAssemblyPreview(selectedRow)}
+              />
+            </div>
           </div>
 
           <div className="assembly-content">
@@ -1188,14 +1129,10 @@ export default function App() {
                 <Text type="secondary">Загрузка состава из PDM...</Text>
               </div>
             ) : assemblyData.length > 0 ? (
-              <div className="assembly-tree">
-                {assemblyData.map((node, index) => (
-                  <AssemblyNode
-                    key={node.id ?? `${node.idSpecif}-${index}`}
-                    node={node}
-                  />
-                ))}
-              </div>
+              <AssemblyStructureTable
+                data={assemblyData}
+                loading={assemblyLoading}
+              />
             ) : (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}

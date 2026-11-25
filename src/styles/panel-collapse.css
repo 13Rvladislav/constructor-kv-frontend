@@ -1,0 +1,164 @@
+/* =========================================================
+   COLLAPSIBLE WORKSPACE PANELS
+   Сворачивание оставляет узкую панель-кнопку для восстановления.
+   ========================================================= */
+
+.workspace {
+  transition: grid-template-columns 240ms ease;
+}
+
+.workspace > .panel {
+  min-width: 0;
+}
+
+/* Обычный режим: все три панели остаются в сетке. */
+.workspace.tree-panel-collapsed {
+  grid-template-columns:
+    42px
+    minmax(0, 1.3fr)
+    minmax(0, 2fr) !important;
+}
+
+.workspace.table-panel-collapsed {
+  grid-template-columns:
+    minmax(0, 0.7fr)
+    42px
+    minmax(0, 2fr) !important;
+}
+
+/* Одновременно свернуты дерево и таблица. */
+.workspace.tree-panel-collapsed.table-panel-collapsed {
+  grid-template-columns: 42px 42px minmax(0, 1fr) !important;
+}
+
+/* Свернутая панель не исчезает: оставляем заголовок с кнопкой возврата. */
+.workspace > .tree-panel-collapsed,
+.workspace > .table-panel-collapsed {
+  min-width: 42px;
+}
+
+/* Левая панель в свернутом состоянии. */
+.workspace.tree-panel-collapsed > .tree-panel {
+  display: flex !important;
+  min-width: 42px;
+  overflow: hidden;
+}
+
+.workspace.tree-panel-collapsed > .tree-panel > :not(.panel-header) {
+  display: none !important;
+}
+
+.workspace.tree-panel-collapsed > .tree-panel > .panel-header {
+  min-height: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 10px 4px;
+}
+
+.workspace.tree-panel-collapsed > .tree-panel > .panel-header > div {
+  display: none !important;
+}
+
+.workspace.tree-panel-collapsed > .tree-panel .panel-collapse-button {
+  display: inline-flex;
+  margin: 0 auto;
+}
+
+/* Центральная панель в свернутом состоянии. */
+.workspace.table-panel-collapsed > .table-panel {
+  display: flex !important;
+  min-width: 42px;
+  overflow: hidden;
+}
+
+.workspace.table-panel-collapsed > .table-panel > :not(.panel-header) {
+  display: none !important;
+}
+
+.workspace.table-panel-collapsed > .table-panel > .panel-header {
+  min-height: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 8px;
+  padding: 10px 4px;
+}
+
+.workspace.table-panel-collapsed > .table-panel > .panel-header > .table-panel-heading {
+  display: none !important;
+}
+
+.workspace.table-panel-collapsed > .table-panel > .panel-header > .panel-header-actions {
+  width: 100%;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workspace.table-panel-collapsed > .table-panel .panel-header-actions > :not(.panel-collapse-button) {
+  display: none !important;
+}
+
+.workspace.table-panel-collapsed > .table-panel .panel-collapse-button {
+  display: inline-flex;
+  margin: 0 auto;
+}
+
+/* Режим фокуса: только состав, на всю ширину рабочей области. */
+.workspace.assembly-focus-mode {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+
+.workspace.assembly-focus-mode > .tree-panel,
+.workspace.assembly-focus-mode > .table-panel {
+  display: none !important;
+}
+
+.workspace.assembly-focus-mode > .assembly-panel {
+  display: flex !important;
+  grid-column: 1 / -1;
+  width: 100% !important;
+  min-width: 0;
+}
+
+/* Кнопки управления панелями. */
+.panel-header > .ant-btn,
+.panel-header-actions > .ant-btn {
+  flex: 0 0 auto;
+}
+
+.panel-header > .ant-btn-text,
+.panel-header-actions > .ant-btn-text {
+  color: #64748b;
+  border-radius: 6px;
+}
+
+.panel-header > .ant-btn-text:hover,
+.panel-header-actions > .ant-btn-text:hover {
+  color: #2563eb;
+  background: #eff6ff;
+}
+
+.panel-collapse-button {
+  z-index: 2;
+}
+
+/* На узких экранах режим фокуса также раскрывает состав полностью.
+   Сворачивание в узкую полоску остается доступным. */
+@media (max-width: 1050px) {
+  .workspace.assembly-focus-mode {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  .workspace.assembly-focus-mode > .tree-panel,
+  .workspace.assembly-focus-mode > .table-panel {
+    display: none !important;
+  }
+
+  .workspace.assembly-focus-mode > .assembly-panel {
+    grid-column: 1 / -1;
+  }
+}

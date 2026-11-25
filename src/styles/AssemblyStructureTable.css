@@ -1,0 +1,148 @@
+
+.assembly-structure-table {
+  width: 100%;
+  min-width: 0;
+}
+
+.assembly-structure-ant-table {
+  width: 100%;
+  font-size: 10px;
+}
+
+.assembly-structure-ant-table .ant-table {
+  color: #334155;
+  font-size: 10px;
+}
+
+.assembly-structure-ant-table .ant-table-container {
+  border-radius: 6px;
+}
+
+.assembly-structure-ant-table .ant-table-thead > tr > th {
+  padding: 7px 6px;
+  color: #526178;
+  background: #f5f8fc;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.assembly-structure-ant-table .ant-table-tbody > tr > td {
+  padding: 7px 6px;
+  color: #334155;
+  border-bottom: 1px solid #edf1f6;
+  font-size: 10px;
+  vertical-align: top;
+}
+
+.assembly-structure-ant-table .ant-table-tbody > tr:last-child > td {
+  border-bottom: none;
+}
+
+.assembly-structure-ant-table .ant-table-tbody > tr:hover > td {
+  background: #f5f8fd !important;
+}
+
+.assembly-structure-ant-table .ant-table-row-expand-icon {
+  width: 14px;
+  height: 14px;
+  margin-top: 1px;
+  color: #64748b;
+  background: #ffffff;
+  border-color: #cbd5e1;
+  border-radius: 4px;
+}
+
+.assembly-structure-ant-table .ant-table-row-expand-icon:hover {
+  color: #2563eb;
+  border-color: #2563eb;
+}
+
+.assembly-table-parent-row > td {
+  background: #f8fafc;
+}
+
+.assembly-table-leaf-row > td {
+  background: #ffffff;
+}
+
+.assembly-table-design-cell {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+
+.assembly-table-assembly-icon {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.assembly-table-design {
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.assembly-table-name-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+}
+
+.assembly-table-name {
+  color: #475569;
+  font-size: 10px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.assembly-table-type {
+  margin: 0;
+  padding: 0 4px;
+  border-radius: 4px;
+  font-size: 9px;
+  line-height: 16px;
+}
+
+.assembly-table-material {
+  display: inline-block;
+  color: #64748b;
+  font-size: 9px;
+  line-height: 1.4;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.assembly-table-series {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.assembly-table-series .ant-tag {
+  margin: 0;
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 16px;
+}
+
+.assembly-table-series-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 5px 7px;
+  border-top: 1px solid #edf1f6;
+}
+
+@media (max-width: 1200px) {
+  .assembly-structure-ant-table .ant-table-thead > tr > th,
+  .assembly-structure-ant-table .ant-table-tbody > tr > td {
+    padding: 6px 4px;
+  }
+}
