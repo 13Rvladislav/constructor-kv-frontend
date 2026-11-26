@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   Button,
   Divider,
   Empty,
   Modal,
   Space,
+  Table,
   Tag,
   Tooltip,
   Typography,
@@ -15,62 +17,67 @@ import {
   ExpandAltOutlined,
   ReloadOutlined,
   TableOutlined,
-  DownOutlined,
-  RightOutlined,
-  AppstoreOutlined,
-  ToolOutlined,
-  BuildOutlined,
-  ShoppingOutlined,
-  ExperimentOutlined,
-  FileTextOutlined,
 } from '@ant-design/icons';
 
 import '../styles/assembly-preview.css';
 
 const { Text, Title } = Typography;
 
+const TYPE_CONFIG = {
+  SB: { label: 'СБОРКА', color: 'purple', group: 'assembly' },
+  СБ: { label: 'СБОРКА', color: 'purple', group: 'assembly' },
+  DET: { label: 'ДЕТАЛЬ', color: 'green', group: 'detail' },
+  ДЕТ: { label: 'ДЕТАЛЬ', color: 'green', group: 'detail' },
+  ST: { label: 'СТАНДАРТНОЕ', color: 'orange', group: 'standard' },
+  СТ: { label: 'СТАНДАРТНОЕ', color: 'orange', group: 'standard' },
+  POK: { label: 'ПОКУПНОЕ', color: 'magenta', group: 'purchased' },
+  ПОК: { label: 'ПОКУПНОЕ', color: 'magenta', group: 'purchased' },
+  MAT: { label: 'МАТЕРИАЛ', color: 'cyan', group: 'material' },
+  МАТ: { label: 'МАТЕРИАЛ', color: 'cyan', group: 'material' },
+};
+
 const DIVISION_GROUPS = [
   {
     key: 'documentation',
     title: 'Документация',
     order: 0,
-    icon: FileTextOutlined,
-    match: ['документ', 'чертеж', 'чертёж'],
+    match: ['документац', 'чертеж', 'чертёж'],
+    color: 'blue',
   },
   {
     key: 'assembly',
     title: 'Сборочные единицы',
     order: 1,
-    icon: AppstoreOutlined,
     match: ['сбор', 'узел', 'агрегат'],
+    color: 'purple',
   },
   {
     key: 'standard',
     title: 'Стандартные изделия',
     order: 2,
-    icon: BuildOutlined,
     match: ['стандарт'],
+    color: 'orange',
   },
   {
     key: 'material',
     title: 'Материалы',
     order: 3,
-    icon: ExperimentOutlined,
     match: ['материал'],
+    color: 'cyan',
   },
   {
     key: 'detail',
     title: 'Детали',
     order: 4,
-    icon: ToolOutlined,
     match: ['детал'],
+    color: 'green',
   },
   {
     key: 'purchased',
     title: 'Покупные изделия',
     order: 5,
-    icon: ShoppingOutlined,
     match: ['покуп'],
+    color: 'magenta',
   },
 ];
 
@@ -78,8 +85,8 @@ const UNKNOWN_GROUP = {
   key: 'other',
   title: 'Прочие элементы',
   order: 99,
-  icon: ToolOutlined,
   match: [],
+  color: 'default',
 };
 
 function valueOrDash(value) {
@@ -88,64 +95,100 @@ function valueOrDash(value) {
     : value;
 }
 
-function normalizeDivisionName(node) {
-  return String(node?.divisionName ?? '').trim().toLowerCase();
-}
-
-function getDivisionGroup(node) {
-  const divisionName = normalizeDivisionName(node);
-
-  if (divisionName) {
-    const found = DIVISION_GROUPS.find((group) =>
-      group.match.some((word) => divisionName.includes(word)),
-    );
-
-    if (found) return found;
-
-    return {
-      ...UNKNOWN_GROUP,
-      title: String(node.divisionName).trim(),
-    };
-  }
-
-  const rawType = String(
+function getRawType(node) {
+  return String(
     node?.elementType ??
     node?.type ??
     node?.kind ??
     node?.tip ??
     node?.typeCode ??
     '',
-  ).trim().toLowerCase();
+  ).trim().toUpperCase();
+}
 
-  if (rawType.includes('сбор') || rawType === 'sb' || rawType === 'сб') {
-    return DIVISION_GROUPS[1];
-  }
-  if (rawType.includes('стандарт') || rawType === 'st' || rawType === 'ст') {
-    return DIVISION_GROUPS[2];
-  }
-  if (rawType.includes('материал') || rawType === 'mat' || rawType === 'мат') {
-    return DIVISION_GROUPS[3];
-  }
-  if (rawType.includes('детал') || rawType === 'det' || rawType === 'дет') {
-    return DIVISION_GROUPS[4];
-  }
-  if (rawType.includes('покуп') || rawType === 'pok' || rawType === 'пок') {
-    return DIVISION_GROUPS[5];
+/**
+ * Тип в первую очередь определяется по divisionName, который приходит из PDM.
+ * Числовой ID используется только для известного корневого ID_DIVISION = 3.
+ */
+function getNodeType(node) {
+  const divisionName = String(node?.divisionName ?? '').trim();
+
+  if (divisionName) {
+    const normalized = divisionName.toLowerCase();
+    const group = DIVISION_GROUPS.find((item) =>
+      item.match.some((word) => normalized.includes(word)),
+    );
+
+    if (group) {
+      const configured = Object.values(TYPE_CONFIG).find(
+        (item) => item.group === group.key,
+      );
+
+      return {
+        label: group.key === 'assembly'
+          ? 'СБОРКА'
+          : group.key === 'standard'
+            ? 'СТАНДАРТНОЕ'
+            : group.key === 'purchased'
+              ? 'ПОКУПНОЕ'
+              : group.key === 'material'
+                ? 'МАТЕРИАЛ'
+                : group.key === 'detail'
+                  ? 'ДЕТАЛЬ'
+                  : divisionName.toUpperCase(),
+        color: configured?.color || group.color,
+        group: group.key,
+        divisionName,
+      };
+    }
+
+    return {
+      label: divisionName.toUpperCase(),
+      color: 'default',
+      group: 'other',
+      divisionName,
+    };
   }
 
-  // В текущей модели корневая сборка имеет ID_DIVISION = 3.
+  const rawType = getRawType(node);
+  if (TYPE_CONFIG[rawType]) {
+    return {
+      ...TYPE_CONFIG[rawType],
+      divisionName: '',
+    };
+  }
+
   if (Number(node?.idDivision) === 3) {
-    return DIVISION_GROUPS[1];
+    return {
+      label: 'СБОРКА',
+      color: 'purple',
+      group: 'assembly',
+      divisionName: '',
+    };
   }
 
-  return UNKNOWN_GROUP;
+  return {
+    label: 'НЕ ОПРЕДЕЛЁН',
+    color: 'default',
+    group: 'other',
+    divisionName: '',
+  };
+}
+
+function getDivisionGroup(node) {
+  const type = getNodeType(node);
+  const group = DIVISION_GROUPS.find((item) => item.key === type.group);
+
+  if (group) return group;
+
+  return {
+    ...UNKNOWN_GROUP,
+    title: type.divisionName || 'Прочие элементы',
+  };
 }
 
 function isAssembly(node) {
-  return (
-    Number(node?.idDivision) === 3 ||
-    getDivisionGroup(node).key === 'assembly'
-  );
+  return getNodeType(node).group === 'assembly';
 }
 
 function getNodeKey(node, parentKey, index) {
@@ -165,6 +208,7 @@ function prepareTree(nodes = [], parentKey = 'root') {
       ...node,
       key,
       _isAssembly: assembly,
+      _type: getNodeType(node),
       _divisionGroup: getDivisionGroup(node),
       children: assembly && Array.isArray(node.children)
         ? prepareTree(node.children, key)
@@ -179,6 +223,7 @@ function collectAllNodes(nodes = []) {
   const visit = (items) => {
     items.forEach((node) => {
       result.push(node);
+
       if (node._isAssembly && node.children?.length) {
         visit(node.children);
       }
@@ -224,30 +269,21 @@ function groupNodes(nodes = []) {
   return [...groups.values()].sort((a, b) => a.order - b.order);
 }
 
-function formatMass(value) {
-  if (value === null || value === undefined || value === '') return '—';
-  const number = Number(value);
-  return Number.isFinite(number) ? number.toFixed(2) : value;
-}
+function buildGroupedRows(nodes = []) {
+  const rows = [];
 
-function getNodeStatus(node) {
-  if (node?.fitsSeries === true) return 'success';
-  if (node?.fitsSeries === false) return 'error';
-  return 'default';
-}
+  groupNodes(nodes).forEach((group) => {
+    rows.push({
+      key: `group-${group.key}-${rows.length}`,
+      _isGroup: true,
+      _group: group,
+      _groupCount: group.nodes.length,
+    });
 
-function StatusIndicator({ status }) {
-  const title = status === 'success'
-    ? 'Подходит'
-    : status === 'error'
-      ? 'Не подходит'
-      : 'Нет проверки';
+    group.nodes.forEach((node) => rows.push(node));
+  });
 
-  return (
-    <Tooltip title={title}>
-      <span className={`bom-status-dot bom-status-${status}`} />
-    </Tooltip>
-  );
+  return rows;
 }
 
 function getSeriesLabel(series) {
@@ -263,33 +299,48 @@ function getSeriesLabel(series) {
     return `${valueOrDash(mini)}–${valueOrDash(maxi)}${
       quantity !== undefined ? ` × ${quantity}` : ''
     }${
-      massa !== undefined && massa !== null
-        ? ` · ${Number(massa).toFixed(2)} кг`
-        : ''
+      massa !== undefined ? ` · ${Number(massa).toFixed(2)} кг` : ''
     }`;
   }
 
-  return series.name ?? series.design ?? series.obozn ?? series.value ?? 'Серия';
+  return (
+    series.name ??
+    series.design ??
+    series.obozn ??
+    series.value ??
+    'Серия'
+  );
 }
 
-function SeriesView({ series }) {
+function SeriesList({ series }) {
   if (!Array.isArray(series) || series.length === 0) {
-    return <Text className="bom-muted">Нет серий</Text>;
+    return (
+      <Text type="secondary" className="preview-no-series">
+        нет серий
+      </Text>
+    );
   }
 
   return (
-    <div className="bom-series-list">
+    <div className="preview-series-list">
       {series.map((item, index) => {
         const label = getSeriesLabel(item);
-        const fits = typeof item === 'object' && item !== null
-          ? item.fitsSeries
-          : undefined;
+        const status =
+          typeof item === 'object' && item !== null
+            ? item.fitsSeries
+            : undefined;
 
         return (
           <Tag
             key={`${label}-${index}`}
-            color={fits === true ? 'success' : fits === false ? 'error' : undefined}
-            className="bom-series-tag"
+            color={
+              status === true
+                ? 'success'
+                : status === false
+                  ? 'error'
+                  : undefined
+            }
+            className="preview-series-tag"
           >
             {label}
           </Tag>
@@ -299,190 +350,233 @@ function SeriesView({ series }) {
   );
 }
 
-function TypeBadge({ node }) {
-  const group = node._divisionGroup || getDivisionGroup(node);
+function getNodeStatus(node) {
+  if (node.fitsSeries === true) return 'success';
+  if (node.fitsSeries === false) return 'error';
+  return 'default';
+}
+
+function StatusIndicator({ status }) {
+  const title = status === 'success'
+    ? 'Подходит'
+    : status === 'error'
+      ? 'Не подходит'
+      : 'Нет проверки';
 
   return (
-    <Tag color={group.key === 'assembly' ? 'purple' : 'default'} className={`bom-type-badge bom-type-${group.key}`}>
-      {group.key === 'assembly' ? 'Сборка' : group.title}
+    <Tooltip title={title}>
+      <span className={`preview-status-dot preview-status-${status}`} />
+    </Tooltip>
+  );
+}
+
+function ElementTypeTag({ node }) {
+  const type = node._type || getNodeType(node);
+
+  return (
+    <Tag
+      color={type.color}
+      bordered={false}
+      className="preview-type-tag"
+    >
+      {type.label}
     </Tag>
   );
 }
 
-function NodeMetrics({ node }) {
-  return (
-    <div className="bom-node-metrics">
-      <span><Text type="secondary">Кол-во</Text><strong>{valueOrDash(node.quantity)}</strong></span>
-      <span><Text type="secondary">Масса</Text><strong>{formatMass(node.massa)}{formatMass(node.massa) !== '—' ? ' кг' : ''}</strong></span>
-    </div>
-  );
+function formatMass(value) {
+  if (value === null || value === undefined || value === '') return '—';
+
+  const number = Number(value);
+  return Number.isFinite(number) ? number.toFixed(2) : value;
 }
 
-function ElementRow({ node, expanded, expandedKeys, onToggle, level = 0 }) {
-  const expandable = node._isAssembly && node.children?.length > 0;
-  const status = getNodeStatus(node);
-
-  return (
-    <div className={`bom-element-row ${status !== 'default' ? `bom-element-${status}` : ''}`}>
-      <div className="bom-element-main">
-        <div className="bom-element-tree-indent" style={{ '--bom-level': level }} />
-
-        {expandable ? (
-          <button
-            type="button"
-            className={`bom-expand-button ${expanded ? 'is-expanded' : ''}`}
-            onClick={() => onToggle(node.key)}
-            aria-label={expanded ? 'Свернуть сборку' : 'Раскрыть сборку'}
-            title={expanded ? 'Свернуть состав сборки' : 'Раскрыть состав сборки'}
-          >
-            {expanded ? <DownOutlined /> : <RightOutlined />}
-          </button>
-        ) : (
-          <span className="bom-expand-placeholder" />
-        )}
-
-        <span className={`bom-element-icon ${node._isAssembly ? 'is-assembly' : ''}`}>
-          {node._isAssembly ? <AppstoreOutlined /> : <ToolOutlined />}
-        </span>
-
-        <div className="bom-element-identity">
-          <div className="bom-element-designation">
-            <Text strong>{valueOrDash(node.obozn)}</Text>
-            {node._isAssembly && <Tag color="purple">Сборка</Tag>}
-          </div>
-          <Text className="bom-element-name">{valueOrDash(node.naim)}</Text>
-          {node._isAssembly && expandable && (
-            <Text className="bom-child-hint">
-              Содержит {node.children.length} непосредственных элементов
-            </Text>
-          )}
-        </div>
-
-        <div className="bom-element-type">
-          {!node._isAssembly && <TypeBadge node={node} />}
-        </div>
-
-        <NodeMetrics node={node} />
-
-        <div className="bom-element-material">
-          <Text>{valueOrDash(node.material)}</Text>
-        </div>
-
-        <div className="bom-element-series">
-          <SeriesView series={node.series} />
-        </div>
-
-        <div className="bom-element-status">
-          <StatusIndicator status={status} />
-        </div>
-      </div>
-
-      {expandable && expanded && (
-        <div className="bom-nested-content">
-          <div className="bom-nested-caption">
-            <span className="bom-nested-line" />
-            <span>Состав сборки {valueOrDash(node.obozn)}</span>
-            <Tag>{collectAllNodes(node.children).length} элементов</Tag>
-          </div>
-          <GroupedContents
-            nodes={node.children}
-            expandedKeys={[]}
-            onToggle={onToggle}
-            level={level + 1}
-            parentExpandedKeys={undefined}
-            rootExpandedKeys={undefined}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function GroupedContents({
-  nodes,
-  expandedKeys,
-  onToggle,
-  level = 0,
-}) {
-  const groups = useMemo(() => groupNodes(nodes), [nodes]);
-
-  return (
-    <div className={`bom-groups bom-level-${Math.min(level, 5)}`}>
-      {groups.map((group) => {
-        const GroupIcon = group.icon;
+function createColumns() {
+  return [
+    {
+      title: 'Обозначение',
+      dataIndex: 'obozn',
+      key: 'obozn',
+      width: 175,
+      render: (value, node) => {
+        if (node._isGroup) {
+          return {
+            children: (
+              <div className="preview-group-heading">
+                <span className={`preview-group-marker preview-group-${node._group.key}`} />
+                <span>{node._group.title}</span>
+                <span className="preview-group-count">{node._groupCount}</span>
+              </div>
+            ),
+            props: { colSpan: 8 },
+          };
+        }
 
         return (
-          <section className="bom-group" key={`${level}-${group.key}`}>
-            <div className="bom-group-heading">
-              <div className="bom-group-title">
-                <GroupIcon />
-                <span>{group.title}</span>
-                <span className="bom-group-count">{group.nodes.length}</span>
-              </div>
-            </div>
-
-            <div className="bom-group-items">
-              {group.nodes.map((node) => (
-                <ElementRow
-                  key={node.key}
-                  node={node}
-                  expanded={expandedKeys.includes(node.key)}
-                  expandedKeys={expandedKeys}
-                  onToggle={onToggle}
-                  level={level}
-                />
-              ))}
-            </div>
-          </section>
+          <div className="preview-design-cell">
+            <span className={`preview-node-icon ${node._isAssembly ? 'preview-node-icon-assembly' : ''}`}>
+              {node._isAssembly ? '▣' : '⚙'}
+            </span>
+            <Text className="preview-design">
+              {valueOrDash(value)}
+            </Text>
+          </div>
         );
-      })}
-    </div>
-  );
+      },
+    },
+    {
+      title: 'Наименование',
+      dataIndex: 'naim',
+      key: 'naim',
+      width: 210,
+      render: (value, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : (
+        <Text className="preview-name">{valueOrDash(value)}</Text>
+      ),
+    },
+    {
+      title: 'Тип',
+      key: 'type',
+      width: 115,
+      align: 'center',
+      render: (_, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : (
+        <ElementTypeTag node={node} />
+      ),
+    },
+    {
+      title: 'Кол-во',
+      dataIndex: 'quantity',
+      key: 'quantity',
+      width: 75,
+      align: 'center',
+      render: (value, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : valueOrDash(value),
+    },
+    {
+      title: 'Масса, кг',
+      dataIndex: 'massa',
+      key: 'massa',
+      width: 95,
+      align: 'right',
+      render: (value, node) => {
+        if (node._isGroup) return { children: null, props: { colSpan: 0 } };
+        return formatMass(value);
+      },
+    },
+    {
+      title: 'Материал',
+      dataIndex: 'material',
+      key: 'material',
+      width: 180,
+      render: (value, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : (
+        <Text className="preview-material">{valueOrDash(value)}</Text>
+      ),
+    },
+    {
+      title: 'Статус',
+      key: 'status',
+      width: 75,
+      align: 'center',
+      render: (_, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : (
+        <StatusIndicator status={getNodeStatus(node)} />
+      ),
+    },
+    {
+      title: 'Серии',
+      dataIndex: 'series',
+      key: 'series',
+      width: 190,
+      render: (series, node) => node._isGroup ? { children: null, props: { colSpan: 0 } } : (
+        <SeriesList series={series} />
+      ),
+    },
+  ];
 }
 
-function RootAssembly({ node, expandedKeys, onToggle }) {
-  const status = getNodeStatus(node);
-  const groups = groupNodes(node.children || []);
-  const totalChildren = collectAllNodes(node.children || []).length;
+const TABLE_COLUMNS = createColumns();
+
+function GroupedAssemblyTable({
+  nodes,
+  expandedKeys,
+  onToggleExpand,
+  level = 0,
+  defaultExpandedKeys = [],
+}) {
+  const dataSource = useMemo(() => buildGroupedRows(nodes), [nodes]);
+
+  const assemblyKeys = useMemo(
+    () => nodes
+      .filter((node) => node._isAssembly && node.children?.length)
+      .map((node) => node.key),
+    [nodes],
+  );
 
   return (
-    <div className={`bom-root-card ${status !== 'default' ? `bom-root-${status}` : ''}`}>
-      <div className="bom-root-header">
-        <div className="bom-root-title">
-          <span className="bom-root-icon"><AppstoreOutlined /></span>
-          <div>
-            <div className="bom-root-designation">
-              <Title level={4}>{valueOrDash(node.obozn)}</Title>
-              <Tag color="purple">Головная сборка</Tag>
+    <div className={`preview-nested-table preview-nested-level-${Math.min(level, 5)}`}>
+      <Table
+        className="preview-table preview-hierarchy-table"
+        columns={TABLE_COLUMNS}
+        dataSource={dataSource}
+        rowKey="key"
+        size="small"
+        pagination={false}
+        bordered={false}
+        tableLayout="fixed"
+        expandable={{
+          expandedRowKeys: expandedKeys.filter((key) => assemblyKeys.includes(key)),
+          onExpand: (expanded, record) => onToggleExpand(record.key, expanded),
+          rowExpandable: (record) =>
+            !record._isGroup &&
+            record._isAssembly &&
+            Array.isArray(record.children) &&
+            record.children.length > 0,
+          expandedRowRender: (record) => (
+            <div className="preview-expanded-assembly">
+              <div className="preview-expanded-caption">
+                <span className="preview-expanded-caption-line" />
+                <span>
+                  Состав сборки: <strong>{valueOrDash(record.obozn)}</strong>
+                </span>
+                <Tag>{record.children.length} позиций первого уровня</Tag>
+              </div>
+              <GroupedAssemblyTable
+                nodes={record.children}
+                expandedKeys={expandedKeys}
+                onToggleExpand={onToggleExpand}
+                level={level + 1}
+              />
             </div>
-            <Text className="bom-root-name">{valueOrDash(node.naim)}</Text>
-          </div>
-        </div>
-        <StatusIndicator status={status} />
-      </div>
+          ),
+          expandIcon: ({ expanded, onExpand, record }) => {
+            if (
+              record._isGroup ||
+              !record._isAssembly ||
+              !record.children?.length
+            ) {
+              return <span className="preview-expand-placeholder" />;
+            }
 
-      <div className="bom-root-meta">
-        <span>Количество <strong>{valueOrDash(node.quantity)}</strong></span>
-        <span>Масса <strong>{formatMass(node.massa)}{formatMass(node.massa) !== '—' ? ' кг' : ''}</strong></span>
-        <span>Всего элементов <strong>{totalChildren}</strong></span>
-      </div>
+            return (
+              <button
+                type="button"
+                className={`preview-expand-button ${expanded ? 'is-expanded' : ''}`}
+                onClick={(event) => onExpand(record, event)}
+                aria-label={expanded ? 'Свернуть сборку' : 'Раскрыть сборку'}
+                title={expanded ? 'Свернуть состав сборки' : 'Раскрыть состав сборки'}
+              >
+                {expanded ? '−' : '+'}
+              </button>
+            );
+          },
+        }}
+        rowClassName={(record) => {
+          if (record._isGroup) return 'preview-row-group';
+          if (record._isAssembly) return 'preview-row-assembly';
 
-      <div className="bom-root-content">
-        <div className="bom-contents-title">
-          <div>
-            <Text strong>Состав головной сборки</Text>
-            <Text type="secondary">Разделён по подразделениям PDM</Text>
-          </div>
-          <Tag>{groups.length} групп</Tag>
-        </div>
-
-        <GroupedContents
-          nodes={node.children || []}
-          expandedKeys={expandedKeys}
-          onToggle={onToggle}
-          level={0}
-        />
-      </div>
+          const status = getNodeStatus(record);
+          return `preview-row-${status}`;
+        }}
+        scroll={level === 0 ? { x: 1115 } : undefined}
+        locale={{ emptyText: 'Нет элементов в этой группе' }}
+      />
     </div>
   );
 }
@@ -505,19 +599,38 @@ export default function AssemblyPreviewModal({
     [data],
   );
 
-  const preparedNodes = useMemo(
+  const tableData = useMemo(
     () => prepareTree(nodes),
     [nodes],
   );
 
   const allNodes = useMemo(
-    () => collectAllNodes(preparedNodes),
-    [preparedNodes],
+    () => collectAllNodes(tableData),
+    [tableData],
   );
 
+  const allExpandableKeys = useMemo(
+    () => collectExpandableKeys(tableData),
+    [tableData],
+  );
+
+  useEffect(() => {
+    // При загрузке нового состава автоматически показываем содержимое головной сборки.
+    const rootAssemblyKeys = tableData
+      .filter((node) => node._isAssembly && node.children?.length)
+      .map((node) => node.key);
+
+    setExpandedKeys(rootAssemblyKeys);
+  }, [tableData]);
+
   const statistics = useMemo(() => {
-    const suitable = allNodes.filter((node) => node.fitsSeries === true).length;
-    const unsuitable = allNodes.filter((node) => node.fitsSeries === false).length;
+    const suitable = allNodes.filter(
+      (node) => node.fitsSeries === true,
+    ).length;
+
+    const unsuitable = allNodes.filter(
+      (node) => node.fitsSeries === false,
+    ).length;
 
     return {
       total: allNodes.length,
@@ -527,16 +640,18 @@ export default function AssemblyPreviewModal({
     };
   }, [allNodes]);
 
-  const toggleExpanded = (key) => {
-    setExpandedKeys((previous) =>
-      previous.includes(key)
-        ? previous.filter((item) => item !== key)
-        : [...previous, key],
-    );
+  const toggleExpand = (key, expanded) => {
+    setExpandedKeys((previous) => {
+      if (expanded) {
+        return previous.includes(key) ? previous : [...previous, key];
+      }
+
+      return previous.filter((item) => item !== key);
+    });
   };
 
   const handleExpandAll = () => {
-    setExpandedKeys(collectExpandableKeys(preparedNodes));
+    setExpandedKeys(allExpandableKeys);
   };
 
   const handleCollapseAll = () => {
@@ -548,10 +663,8 @@ export default function AssemblyPreviewModal({
     selectedRow?.slZapiskaObozn ||
     'Не указано';
 
-  // Номер изделия берём из корневого узла PDM, как и в исходной версии.
+  // Номер изделия берём из корневого узла PDM — сохраняем существующий источник данных.
   const productNumber = nodes[0]?.izdelieNumber;
-
-  const roots = preparedNodes;
 
   return (
     <Modal
@@ -566,16 +679,26 @@ export default function AssemblyPreviewModal({
       className="assembly-preview-modal"
       title={null}
     >
-      <div className="assembly-preview bom-explorer">
+      <div className="assembly-preview">
         <div className="preview-heading">
           <div className="preview-heading-main">
-            <span className="preview-heading-icon"><TableOutlined /></span>
+            <span className="preview-heading-icon">
+              <TableOutlined />
+            </span>
+
             <div>
-              <Title level={3}>Предпросмотр комплектовочной ведомости</Title>
-              <Text type="secondary">Структура изделия и состав вложенных сборок</Text>
+              <Title level={3}>
+                Предпросмотр комплектовочной ведомости
+              </Title>
+              <Text type="secondary">
+                Проверка состава перед формированием КВ
+              </Text>
             </div>
+
             {selectedRow && (
-              <Tag color="processing">Запись № {valueOrDash(selectedRow.number)}</Tag>
+              <Tag color="processing">
+                Запись № {valueOrDash(selectedRow.number)}
+              </Tag>
             )}
           </div>
         </div>
@@ -585,32 +708,50 @@ export default function AssemblyPreviewModal({
             <Text type="secondary">Служебная записка:</Text>
             <Text strong>{valueOrDash(selectedRow?.slZapiskaObozn)}</Text>
           </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Идентификатор СЗ:</Text>
             <Text strong>{valueOrDash(selectedRow?.slZapiskaId)}</Text>
           </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Спецификация:</Text>
             <Text strong>{valueOrDash(selectedRow?.specifId)}</Text>
           </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Сборка:</Text>
             <Text strong>{assemblyDesign}</Text>
           </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Изделие:</Text>
             <Text strong>{valueOrDash(productNumber)}</Text>
           </div>
+
           <div className="preview-summary-item">
             <Text type="secondary">Всего элементов:</Text>
             <Text strong>{statistics.total}</Text>
           </div>
         </div>
 
-        <div className="bom-status-summary">
-          <span><i className="bom-summary-dot bom-summary-ok" />Подходит: <strong>{statistics.suitable}</strong></span>
-          <span><i className="bom-summary-dot bom-summary-error" />Не подходит: <strong>{statistics.unsuitable}</strong></span>
-          <span><i className="bom-summary-dot bom-summary-neutral" />Не проверено: <strong>{statistics.unchecked}</strong></span>
+        <div className="preview-legend">
+          <span className="preview-legend-item">
+            <i className="preview-legend-square preview-legend-green" />
+            Подходит: <strong>{statistics.suitable}</strong>
+          </span>
+          <span className="preview-legend-item">
+            <i className="preview-legend-square preview-legend-red" />
+            Не подходит: <strong>{statistics.unsuitable}</strong>
+          </span>
+          <span className="preview-legend-item">
+            <i className="preview-legend-square preview-legend-gray" />
+            Нет проверки: <strong>{statistics.unchecked}</strong>
+          </span>
+          <span className="preview-legend-item">
+            <i className="preview-legend-line" />
+            Вложенные сборки
+          </span>
         </div>
 
         <div className="preview-toolbar">
@@ -619,10 +760,11 @@ export default function AssemblyPreviewModal({
               type="primary"
               icon={<ExpandAltOutlined />}
               onClick={handleExpandAll}
-              disabled={collectExpandableKeys(preparedNodes).length === 0}
+              disabled={allExpandableKeys.length === 0}
             >
               Развернуть все сборки
             </Button>
+
             <Button
               icon={<DownSquareOutlined />}
               onClick={handleCollapseAll}
@@ -630,30 +772,31 @@ export default function AssemblyPreviewModal({
             >
               Свернуть всё
             </Button>
-            <Button icon={<ReloadOutlined />} onClick={onRefresh} loading={loading}>
+
+            <Button
+              icon={<ReloadOutlined />}
+              onClick={onRefresh}
+              loading={loading}
+            >
               Обновить
             </Button>
           </Space>
         </div>
 
-        <div className="bom-explorer-scroll">
+        <div className="preview-table-wrapper">
           {loading ? (
             <div className="preview-empty">
               <Text type="secondary">Загрузка структуры PDM...</Text>
             </div>
-          ) : roots.length === 0 ? (
+          ) : tableData.length === 0 ? (
             <Empty description="Структура не содержит элементов" />
           ) : (
-            <div className="bom-root-list">
-              {roots.map((root) => (
-                <RootAssembly
-                  key={root.key}
-                  node={root}
-                  expandedKeys={expandedKeys}
-                  onToggle={toggleExpanded}
-                />
-              ))}
-            </div>
+            <GroupedAssemblyTable
+              nodes={tableData}
+              expandedKeys={expandedKeys}
+              onToggleExpand={toggleExpand}
+              level={0}
+            />
           )}
         </div>
 
@@ -663,15 +806,24 @@ export default function AssemblyPreviewModal({
           <Text type="secondary" className="preview-actions-hint">
             Проверьте состав и соответствие серий перед формированием
           </Text>
+
           <Space>
-            <Button danger onClick={onCancel} disabled={confirming}>Отмена</Button>
+            <Button danger onClick={onCancel} disabled={confirming}>
+              Отмена
+            </Button>
+
             <Button
               type="primary"
               className="preview-confirm-button"
               icon={<CheckCircleFilled />}
               onClick={onConfirm}
               loading={confirming}
-              disabled={!canConfirm || loading || nodes.length === 0 || confirming}
+              disabled={
+                !canConfirm ||
+                loading ||
+                nodes.length === 0 ||
+                confirming
+              }
             >
               Подтвердить формирование КВ
             </Button>
